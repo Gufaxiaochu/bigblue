@@ -377,6 +377,22 @@
         }
         .hot-meta { display: flex; gap: 12px; font-size: 12px; color: #999; }
 
+        /* 首页 Tab 栏 */
+        .home-tabs {
+            display: flex; gap: 10px; padding: 12px 20px; background: #fff;
+            border-bottom: 1px solid #E6F0FF;
+        }
+        .home-tabs button {
+            flex: 1; padding: 8px 0; border: none; border-radius: 20px;
+            background: #F0F7FF; color: #0A4D8C; font-size: 14px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .home-tabs button:hover { background: #E6F0FF; }
+        .home-tabs button.active {
+            background: linear-gradient(135deg, #0066FF 0%, #00CCFF 100%);
+            color: white; box-shadow: 0 2px 8px rgba(0, 102, 255, 0.25);
+        }
+
         /* 热榜置顶帖 */
         .hot-item.pinned {
             background: linear-gradient(135deg, #FFF9E6 0%, #FFF0CC 100%);
@@ -1302,6 +1318,11 @@
                 <span class="home-pull-icon">↓</span>
                 <span class="home-pull-text">下拉刷新</span>
             </div>
+            <div class="home-tabs" id="home-tabs">
+                <button class="active" data-tab="latest" onclick="switchHomeTab('latest')">最新</button>
+                <button data-tab="hot" onclick="switchHomeTab('hot')">今日热榜</button>
+                <button data-tab="featured" onclick="switchHomeTab('featured')">精选</button>
+            </div>
             <div id="home-content"></div>
         </div>
 
@@ -1564,6 +1585,8 @@
             document.getElementById('nav-trial').classList.remove('active');
             if (pageId === 'page-home' && currentHomeTab === 'latest') document.getElementById('nav-home').classList.add('active');
 
+            if (pageId === 'page-home') updateHomeTabsUI();
+
             document.getElementById('bottom-home').classList.remove('active');
             document.getElementById('bottom-profile').classList.remove('active');
             document.getElementById('bottom-msg').classList.remove('active');
@@ -1597,6 +1620,26 @@
 
         function showLogin() { showPage('page-login'); }
         function showRegister() { showPage('page-register'); }
+
+        function updateHomeTabsUI() {
+            document.querySelectorAll('#home-tabs button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === currentHomeTab);
+            });
+        }
+
+        function switchHomeTab(tab) {
+            if (tab === currentHomeTab) return;
+            currentHomeTab = tab;
+            updateHomeTabsUI();
+            homeDomCache = null;
+            homeCacheTime = 0;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            const homeContent = document.getElementById('home-content');
+            homeContent.innerHTML = '';
+            if (tab === 'latest') loadPosts();
+            else if (tab === 'hot') loadHotPosts();
+            else if (tab === 'featured') loadFeaturedPosts();
+        }
 
         function navigateHome() {
             currentHomeTab = 'latest';
@@ -1632,8 +1675,8 @@
             const content = document.getElementById('search-content');
             content.innerHTML = spinner();
 
-            // 优先用数据库综合指数排序，失败则回退到前端排序
-            const { data: rpcPosts, error: rpcError } = await supabaseClient.rpc('get_hot_posts', { p_limit: 30 });
+            // 搜索页热榜：全站历史最热帖子 TOP30
+            const { data: rpcPosts, error: rpcError } = await supabaseClient.rpc('get_all_time_hot_posts', { p_limit: 30 });
             let posts;
             if (!rpcError && rpcPosts) {
                 posts = rpcPosts.map(p => ({
@@ -1642,9 +1685,12 @@
                     profiles: { id: p.user_id, username: p.username, avatar_url: p.avatar_url }
                 }));
             } else {
-                const { data, error } = await supabaseClient.from('posts')
+                const hiddenIds = await getHiddenPostIds();
+                let query = supabaseClient.from('posts')
                     .select('*, profiles:user_id(id, username, avatar_url)')
                     .limit(100);
+                if (hiddenIds.length > 0) query = query.not('id', 'in', `(${hiddenIds.join(',')})`);
+                const { data, error } = await query;
                 if (error) { content.innerHTML = `<div class="empty">加载失败：${error.message}</div>`; return; }
                 posts = (data || []).map(p => ({
                     ...p,
@@ -1655,7 +1701,7 @@
 
             if (!posts || posts.length === 0) { content.innerHTML = `<div class="empty">暂无热榜内容</div>`; return; }
 
-            content.innerHTML = '<div class="search-section-title">🔥 实时热榜 TOP30</div>' + renderHotList(posts);
+            content.innerHTML = '<div class="search-section-title">🔥 站内最热 TOP30</div>' + renderHotList(posts);
         }
 
         function renderHotList(posts) {
@@ -1689,7 +1735,7 @@
                 pinned.forEach(post => {
                     html += renderItem(post, '↑', 'pinned', 'pinned');
                 });
-                html += '<div class="hot-section-header">🔥 热搜榜</div>';
+                html += '<div class="hot-section-header">🔥 站内最热</div>';
             }
             normal.forEach((post, index) => {
                 const rank = index + 1;
@@ -2158,6 +2204,42 @@
                 if (error) throw error;
                 if (data?.success) {
                     showMessage('已恢复该帖子推荐', 'success');
+                    loadPostDetail(postId);
+                } else {
+                    showMessage(data?.error || '操作失败', 'error');
+                }
+            } catch (e) { showMessage('操作失败：' + e.message, 'error'); }
+        }
+
+        async function featurePost(postId, event) {
+            if (event) event.stopPropagation();
+            if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
+            try {
+                const { data, error } = await supabaseClient.rpc('feature_post', {
+                    p_post_id: postId,
+                    admin_user_id: currentUser.id
+                });
+                if (error) throw error;
+                if (data?.success) {
+                    showMessage('已加精选', 'success');
+                    loadPostDetail(postId);
+                } else {
+                    showMessage(data?.error || '操作失败', 'error');
+                }
+            } catch (e) { showMessage('操作失败：' + e.message, 'error'); }
+        }
+
+        async function unfeaturePost(postId, event) {
+            if (event) event.stopPropagation();
+            if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
+            try {
+                const { data, error } = await supabaseClient.rpc('unfeature_post', {
+                    p_post_id: postId,
+                    admin_user_id: currentUser.id
+                });
+                if (error) throw error;
+                if (data?.success) {
+                    showMessage('已取消精选', 'success');
                     loadPostDetail(postId);
                 } else {
                     showMessage(data?.error || '操作失败', 'error');
@@ -3040,8 +3122,10 @@
                 }));
             } else {
                 const hiddenIds = await getHiddenPostIds();
+                const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
                 let query = supabaseClient.from('posts')
                     .select('*, profiles:user_id(id, username, avatar_url)')
+                    .gte('created_at', since)
                     .limit(100);
                 if (hiddenIds.length > 0) query = query.not('id', 'in', `(${hiddenIds.join(',')})`);
                 const { data, error } = await query;
@@ -3053,7 +3137,7 @@
                 })).sort((a, b) => (b.is_pinned - a.is_pinned) || (b.hot_score - a.hot_score)).slice(0, 30);
             }
 
-            if (!posts || posts.length === 0) { homeContent.innerHTML = `<div class="empty">暂无帖子</div>`; return; }
+            if (!posts || posts.length === 0) { homeContent.innerHTML = `<div class="empty">暂无今日热榜内容</div>`; return; }
 
             const pinned = posts.filter(p => p.is_pinned);
             const normal = posts.filter(p => !p.is_pinned);
@@ -3086,7 +3170,7 @@
                 pinned.forEach(post => {
                     html += renderItem(post, '↑', 'pinned', 'pinned');
                 });
-                html += '<div class="hot-section-header">🔥 热搜榜</div>';
+                html += '<div class="hot-section-header">🔥 今日热榜</div>';
             }
             normal.forEach((post, index) => {
                 const rank = index + 1;
@@ -3096,6 +3180,23 @@
             html += '</div>';
 
             homeContent.innerHTML = html;
+        }
+
+        // 精选帖子
+        async function loadFeaturedPosts() {
+            const homeContent = document.getElementById('home-content');
+            homeContent.innerHTML = spinner();
+
+            const { data: posts, error } = await supabaseClient.rpc('get_featured_posts', { p_limit: 50 });
+            if (error) { homeContent.innerHTML = `<div class="empty">加载失败：${error.message}</div>`; return; }
+
+            if (!posts || posts.length === 0) { homeContent.innerHTML = `<div class="empty">暂无精选帖子</div>`; return; }
+
+            const finalPosts = posts.map(p => ({
+                ...p,
+                profiles: { id: p.user_id, username: p.username, avatar_url: p.avatar_url }
+            }));
+            homeContent.innerHTML = '<div class="masonry">' + finalPosts.map(renderPostCard).join('') + '</div>';
         }
 
         // 帖子详情
@@ -3128,12 +3229,17 @@
 
             const commentsHTML = (comments && comments.length > 0) ? renderCommentsTree(comments) : '<div class="empty" style="padding:20px;">暂无评论，快来抢沙发！</div>';
 
-            // 超级管理员查询帖子隐藏状态
+            // 超级管理员查询帖子隐藏状态和精选状态
             let isHidden = false;
+            let isFeatured = false;
             if (isCurrentUserSuperAdmin()) {
                 try {
                     const { data: hiddenData } = await supabaseClient.rpc('is_post_hidden', { p_post_id: postId });
                     isHidden = !!hiddenData;
+                } catch (e) {}
+                try {
+                    const { data: featuredData } = await supabaseClient.rpc('is_post_featured', { p_post_id: postId });
+                    isFeatured = !!featuredData;
                 } catch (e) {}
             }
 
@@ -3165,6 +3271,7 @@
                             <button class="action-btn report-btn" onclick="openReportModal('${post.id}', event)">🚨 举报</button>
                         ` : ''}
                         ${isCurrentUserSuperAdmin() ? `
+                            <button class="action-btn ${isFeatured ? '' : 'report-btn'}" onclick="${isFeatured ? `unfeaturePost('${post.id}', event)` : `featurePost('${post.id}', event)`}">${isFeatured ? '取消精选' : '⭐ 加精选'}</button>
                             <button class="action-btn ${isHidden ? '' : 'report-btn'}" onclick="${isHidden ? `unhidePostFromRecommend('${post.id}', event)` : `hidePostFromRecommend('${post.id}', event)`}">${isHidden ? '✅ 恢复推荐' : '🚫 不推荐'}</button>
                         ` : ''}
                     </div>
@@ -3757,7 +3864,11 @@
             }
 
             const currentPage = document.querySelector('.page:not(.hidden)');
-            if (currentPage.id === 'page-home') { currentHomeTab === 'hot' ? loadHotPosts() : loadPosts(); }
+            if (currentPage.id === 'page-home') {
+                if (currentHomeTab === 'hot') loadHotPosts();
+                else if (currentHomeTab === 'featured') loadFeaturedPosts();
+                else loadPosts();
+            }
             if (currentPage.id === 'page-detail') loadPostDetail(postId);
             if (currentPage.id === 'page-profile') loadProfilePage();
             if (currentPage.id === 'page-user') loadUserHomePage(viewingUserId);
@@ -3982,7 +4093,11 @@
             if (currentPage.id === 'page-detail') { navigateHome(); }
             else if (currentPage.id === 'page-profile') { loadProfilePage(); }
             else if (currentPage.id === 'page-user') { loadUserHomePage(viewingUserId); }
-            else if (currentPage.id === 'page-home') { loadPosts(); }
+            else if (currentPage.id === 'page-home') {
+                if (currentHomeTab === 'hot') loadHotPosts();
+                else if (currentHomeTab === 'featured') loadFeaturedPosts();
+                else loadPosts();
+            }
             else if (currentPage.id === 'page-search') { loadSearchHotPreview(); }
         }
 
@@ -4160,16 +4275,12 @@
         }
 
         // ========== 公投审核系统 ==========
-        let trialCheckTimer = null;
 
         async function loadTrialList() {
             const homeContent = document.getElementById('home-content');
             homeContent.innerHTML = `<div style="text-align:center;padding:20px;"><div style="font-size:20px;margin-bottom:10px;">⚖️</div>正在加载公审列表...</div>`;
 
             try {
-                // 先执行整点检查，结算投票状态（不再自动删帖）
-                try { await supabaseClient.rpc('check_hourly_trials'); } catch (e) {}
-
                 await loadPostTrialList(homeContent);
             } catch (err) {
                 homeContent.innerHTML = `<div class="empty">加载失败：${err.message}</div>`;
@@ -4190,11 +4301,10 @@
                     <div style="text-align:center;padding:40px;">
                         <p style="color:#888;">当前没有待审核的帖子</p>
                         <p style="color:#999;font-size:13px;margin-top:10px;">被举报≥2次的帖子将自动进入公审</p>
-                        <p style="color:#999;font-size:13px;">超过半数判定违规后，由超级管理员决定是否下架</p>
+                        <p style="color:#999;font-size:13px;">由超级管理员根据投票情况决定是否下架</p>
                     </div>
                 `;
                 homeContent.innerHTML = html;
-                scheduleHourlyCheck();
                 return;
             }
 
@@ -4210,8 +4320,7 @@
             }
 
             const activeCount = trials.filter(t => t.status === 'active').length;
-            const violateCount = trials.filter(t => t.status === 'violate').length;
-            html += `<p style="color:#999;font-size:13px;margin-bottom:15px;">${trials.length} 个帖子等待处理 · 整点统计投票结果${activeCount > 0 ? `（${activeCount} 个投票中）` : ''}${violateCount > 0 ? ` · ${violateCount} 个等待管理员处理` : ''}</p>`;
+            html += `<p style="color:#999;font-size:13px;margin-bottom:15px;">${trials.length} 个帖子等待处理${activeCount > 0 ? `（${activeCount} 个投票中）` : ''} · 超级管理员可直接处理</p>`;
 
             const isAdmin = isCurrentUserSuperAdmin();
 
@@ -4272,18 +4381,16 @@
                             </button>
                         ` : (!currentUser && isActive ? '<span style="color:#999;font-size:13px;">登录后可投票</span>' : '<span style="color:#999;font-size:13px;">投票已结束</span>')}
                     </div>
-                    ${isAdmin && isViolate && t.post_id ? `
+                    ${isAdmin && t.post_id ? `
                         <div class="trial-vote-btns" style="margin-top:10px;">
-                            <button class="btn btn-danger" onclick="adminHideTrialPost('${t.post_id}', '${t.trial_id}', event)">🚫 隐藏该帖子</button>
-                            <button class="btn btn-outline" style="border-color:#999;color:#666;" onclick="adminIgnoreTrial('${t.trial_id}', event)">✅ 忽略（不隐藏）</button>
+                            <button class="btn btn-danger" onclick="adminDeleteTrialPost('${t.trial_id}', event)">🚫 删除该帖子</button>
+                            <button class="btn btn-outline" style="border-color:#999;color:#666;" onclick="adminKeepTrialPost('${t.trial_id}', event)">✅ 保留该帖子</button>
                         </div>
                     ` : ''}
-                    <div class="trial-next-check" id="trial-timer-${t.trial_id}"></div>
                 </div>`;
             }
 
             homeContent.innerHTML = html;
-            scheduleHourlyCheck();
         }
 
         async function castTrialVote(trialId, verdict, btn) {
@@ -4318,46 +4425,19 @@
             loadTrialList();
         }
 
-        async function adminHideTrialPost(postId, trialId, event) {
+        async function adminDeleteTrialPost(trialId, event) {
             if (event) event.stopPropagation();
             if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
-            if (!confirm('确定要隐藏该帖子吗？隐藏后帖子将从首页/搜索/热榜/分类中移除，但保留在作者主页。')) return;
+            if (!confirm('确定要删除该帖子吗？删除后帖子将从首页/搜索/热榜/分类中移除，但保留在作者主页。')) return;
 
             try {
-                const { data: hideData, error: hideError } = await supabaseClient.rpc('hide_post_from_recommend', {
-                    p_post_id: postId,
-                    admin_user_id: currentUser.id
-                });
-                if (hideError) throw hideError;
-                if (!hideData?.success) { showMessage(hideData?.error || '隐藏失败', 'error'); return; }
-
-                const { data: resolveData, error: resolveError } = await supabaseClient.rpc('resolve_trial', {
-                    p_trial_id: trialId,
-                    admin_user_id: currentUser.id
-                });
-                if (resolveError) throw resolveError;
-                if (!resolveData?.success) { showMessage(resolveData?.error || '处理失败', 'error'); return; }
-
-                showMessage('已隐藏该帖子并结案', 'success');
-                loadTrialList();
-            } catch (e) {
-                showMessage('操作失败：' + e.message, 'error');
-            }
-        }
-
-        async function adminIgnoreTrial(trialId, event) {
-            if (event) event.stopPropagation();
-            if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
-            if (!confirm('确定要忽略该公审吗？帖子将保持正常显示。')) return;
-
-            try {
-                const { data, error } = await supabaseClient.rpc('resolve_trial', {
+                const { data, error } = await supabaseClient.rpc('admin_delete_trial_post', {
                     p_trial_id: trialId,
                     admin_user_id: currentUser.id
                 });
                 if (error) throw error;
                 if (data?.success) {
-                    showMessage('已忽略该公审', 'success');
+                    showMessage('已删除该帖子并结案', 'success');
                     loadTrialList();
                 } else {
                     showMessage(data?.error || '操作失败', 'error');
@@ -4367,38 +4447,25 @@
             }
         }
 
-        // 整点统计：在页面加载时和整点触发（不再自动删帖，仅结算投票状态）
-        function scheduleHourlyCheck() {
-            if (trialCheckTimer) clearTimeout(trialCheckTimer);
+        async function adminKeepTrialPost(trialId, event) {
+            if (event) event.stopPropagation();
+            if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
+            if (!confirm('确定要保留该帖子吗？帖子将保持正常显示。')) return;
 
-            // 计算到下一个整点的毫秒数
-            const now = new Date();
-            const nextHour = new Date(now);
-            nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
-            const msToNextHour = nextHour - now;
-
-            // 显示距离下次统计的倒计时
-            updateTrialTimers(msToNextHour);
-
-            // 到整点时执行统计
-            trialCheckTimer = setTimeout(async () => {
-                try {
-                    await supabaseClient.rpc('check_hourly_trials');
-                } catch (e) { console.error('整点统计失败:', e); }
-                loadTrialList(); // 刷新列表
-            }, msToNextHour);
-        }
-
-        function updateTrialTimers(msToNextHour) {
-            const minutes = Math.floor(msToNextHour / 60000);
-            const seconds = Math.floor((msToNextHour % 60000) / 1000);
-            document.querySelectorAll('[id^="trial-timer-"]').forEach(el => {
-                el.textContent = `⏰ ${minutes}分${seconds}秒后整点统计投票结果`;
-            });
-
-            // 每秒更新倒计时
-            if (msToNextHour > 0) {
-                setTimeout(() => updateTrialTimers(msToNextHour - 1000), 1000);
+            try {
+                const { data, error } = await supabaseClient.rpc('resolve_trial', {
+                    p_trial_id: trialId,
+                    admin_user_id: currentUser.id
+                });
+                if (error) throw error;
+                if (data?.success) {
+                    showMessage('已保留该帖子', 'success');
+                    loadTrialList();
+                } else {
+                    showMessage(data?.error || '操作失败', 'error');
+                }
+            } catch (e) {
+                showMessage('操作失败：' + e.message, 'error');
             }
         }
 
@@ -4657,7 +4724,9 @@
                     homeDomCache = null;
                     homeCacheTime = 0;
                     window.scrollTo({ top: 0, behavior: 'auto' });
-                    if (currentHomeTab === 'hot') loadHotPosts(); else loadPosts();
+                    if (currentHomeTab === 'hot') loadHotPosts();
+                    else if (currentHomeTab === 'featured') loadFeaturedPosts();
+                    else loadPosts();
 
                     setTimeout(() => {
                         refreshing = false;

@@ -28,6 +28,7 @@ RETURNS TABLE (
     FROM posts p
     LEFT JOIN profiles pr ON pr.id = p.user_id
     WHERE NOT EXISTS (SELECT 1 FROM hidden_posts h WHERE h.post_id = p.id)
+      AND p.created_at >= NOW() - INTERVAL '24 hours'
     ORDER BY (COALESCE(p.likes_count,0)*10 + COALESCE(p.comments_count,0)*20 + COALESCE(p.views,0)) DESC
     LIMIT p_limit;
 $$ LANGUAGE sql SECURITY DEFINER;

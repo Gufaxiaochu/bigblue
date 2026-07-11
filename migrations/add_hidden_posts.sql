@@ -69,7 +69,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 热门帖子（用于首页插入推荐），自动排除被隐藏帖子
+-- 热门帖子（用于首页插入推荐），自动排除被隐藏帖子，仅统计 24 小时内
 DROP FUNCTION IF EXISTS get_hot_posts(integer);
 CREATE OR REPLACE FUNCTION get_hot_posts(p_limit INT DEFAULT 30)
 RETURNS TABLE (
@@ -78,6 +78,7 @@ RETURNS TABLE (
     title TEXT,
     content TEXT,
     image_urls TEXT[],
+    thumbnail_urls TEXT[],
     likes_count INT,
     comments_count INT,
     views INT,
@@ -88,7 +89,38 @@ RETURNS TABLE (
     author_id UUID
 ) AS $$
     SELECT
-        p.id, p.user_id, p.title, p.content, p.image_urls,
+        p.id, p.user_id, p.title, p.content, p.image_urls, p.thumbnail_urls,
+        p.likes_count, p.comments_count, p.views, p.category,
+        p.created_at, pr.username, pr.avatar_url, pr.id AS author_id
+    FROM posts p
+    LEFT JOIN profiles pr ON pr.id = p.user_id
+    WHERE NOT EXISTS (SELECT 1 FROM hidden_posts h WHERE h.post_id = p.id)
+      AND p.created_at >= NOW() - INTERVAL '24 hours'
+    ORDER BY (COALESCE(p.likes_count,0)*10 + COALESCE(p.comments_count,0)*20 + COALESCE(p.views,0)) DESC
+    LIMIT p_limit;
+$$ LANGUAGE sql SECURITY DEFINER;
+
+-- 全站历史热榜（用于搜索页），自动排除被隐藏帖子，不限制时间
+DROP FUNCTION IF EXISTS get_all_time_hot_posts(integer);
+CREATE OR REPLACE FUNCTION get_all_time_hot_posts(p_limit INT DEFAULT 30)
+RETURNS TABLE (
+    id UUID,
+    user_id UUID,
+    title TEXT,
+    content TEXT,
+    image_urls TEXT[],
+    thumbnail_urls TEXT[],
+    likes_count INT,
+    comments_count INT,
+    views INT,
+    category TEXT,
+    created_at TIMESTAMPTZ,
+    username TEXT,
+    avatar_url TEXT,
+    author_id UUID
+) AS $$
+    SELECT
+        p.id, p.user_id, p.title, p.content, p.image_urls, p.thumbnail_urls,
         p.likes_count, p.comments_count, p.views, p.category,
         p.created_at, pr.username, pr.avatar_url, pr.id AS author_id
     FROM posts p
