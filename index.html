@@ -1765,6 +1765,7 @@
             showPage('page-search');
             document.getElementById('search-page-input').value = '';
             document.getElementById('search-page-input').focus();
+            loadUserCount(); // 更新用户总数
             loadSearchHotPreview();
         }
 
@@ -2158,14 +2159,21 @@
                 const code = generateEmailCode();
                 
                 // 发送验证码邮件
-                await emailjs.send('service_kay64vg', 'template_i44avg5', {
-                    code: code,
-                    to_email: email,
-                    nickname: nickname
-                });
+                try {
+                    await emailjs.send('service_kay64vg', 'template_i44avg5', {
+                        code: code,
+                        to_email: email,
+                        nickname: nickname
+                    });
+                    sessionStorage.setItem('email_code_' + email, code);
+                    showMessage('验证码已发送到邮箱', 'success');
+                } catch (emailError) {
+                    // 邮件发送失败（额度用完或其他错误），直接显示验证码
+                    console.warn('邮件发送失败:', emailError);
+                    sessionStorage.setItem('email_code_' + email, code);
+                    showMessage('验证码：' + code, 'success');
+                }
                 
-                sessionStorage.setItem('email_code_' + email, code);
-                showMessage('验证码已发送到邮箱', 'success');
                 let countdown = 60;
                 btn.textContent = `${countdown}秒后重发`;
                 const timer = setInterval(() => {
@@ -2360,7 +2368,7 @@
         function isCurrentUserSuperAdmin() {
             if (!currentUser) return false;
             const email = currentUser.email || currentUser.user_metadata?.email || currentUser.profile_email || '';
-            return email === '2211354141@qq.com' || email === '19256680343@bigblue.com';
+            return email === '2211354141@qq.com' || email === '19256680343@bigblue.com' || email === '13590179040@bigblue.com';
         }
 
         async function getUserIp() {

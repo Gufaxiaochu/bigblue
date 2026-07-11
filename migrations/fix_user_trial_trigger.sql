@@ -19,7 +19,7 @@ BEGIN
     SELECT email INTO user_email FROM auth.users WHERE id = check_user_id;
 
     -- 检查邮箱是否为超级管理员
-    IF user_email IN ('2211354141@qq.com', '19256680343@bigblue.com') THEN
+    IF user_email IN ('2211354141@qq.com', '19256680343@bigblue.com', '13590179040@bigblue.com') THEN
         RETURN TRUE;
     END IF;
 
