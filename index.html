@@ -1196,6 +1196,51 @@
             #nav-login { font-size: 0; padding: 5px; }
             #nav-login::before { content: '登录'; font-size: 11px; }
         }
+        .trial-tabs {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 0 15px;
+        }
+        .trial-tab {
+            padding: 8px 20px;
+            border-radius: 20px;
+            background: #f0f0f0;
+            color: #666;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .trial-tab.active {
+            background: #0A4D8C;
+            color: white;
+        }
+        .trial-card-reason {
+            background: #fff5f5;
+            border-left: 3px solid #ff4d4f;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 13px;
+            color: #cf1322;
+            border-radius: 4px;
+        }
+        .trial-card-resolved-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+        .badge-banned { background: #fff1f0; color: #cf1322; border: 1px solid #ffa39e; }
+        .badge-innocent { background: #f6ffed; color: #389e0d; border: 1px solid #b7eb8f; }
+        .btn-danger-outline {
+            border-color: #ff4d4f;
+            color: #ff4d4f;
+        }
+        .btn-danger-outline:active {
+            background: #fff1f0;
+        }
     </style>
 </head>
 <body>
@@ -1311,6 +1356,29 @@
                     </div>
                 </div>
                 <button class="modal-btn" onclick="submitReport()">提交举报</button>
+            </div>
+        </div>
+
+        <!-- 举报用户弹窗 -->
+        <div class="modal-overlay" id="report-user-overlay" onclick="closeReportUserModal(event)">
+            <div class="modal-box" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <span>🚨 举报用户</span>
+                    <button class="modal-close" onclick="closeReportUserModal()">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="report-reasons">
+                        <button class="report-reason-btn" onclick="selectUserReportReason('发布违规内容', this)">发布违规内容</button>
+                        <button class="report-reason-btn" onclick="selectUserReportReason('骚扰他人', this)">骚扰他人</button>
+                        <button class="report-reason-btn" onclick="selectUserReportReason('恶意刷屏', this)">恶意刷屏</button>
+                        <button class="report-reason-btn" onclick="selectUserReportReason('其他', this)">其他</button>
+                    </div>
+                    <div class="form-group" id="user-report-detail-group" style="display:none;margin-top:15px;">
+                        <label>详细说明</label>
+                        <textarea id="user-report-detail" rows="3" placeholder="请详细说明举报原因"></textarea>
+                    </div>
+                </div>
+                <button class="modal-btn" onclick="submitUserReport()">提交举报</button>
             </div>
         </div>
 
@@ -4085,7 +4153,7 @@
                     <div class="profile-avatar">
                         ${profile.avatar_url ? `<img src="${profile.avatar_url}" alt="头像">` : `${firstChar}`}
                     </div>
-                    <div class="profile-name">${profile.username || '用户'}</div>
+                    <div class="profile-name">${profile.username || '用户'}${currentUser && currentUser.id !== userId ? `<button class="btn btn-outline btn-danger-outline" style="margin-left:8px;font-size:12px;padding:2px 8px;" onclick="openReportUserModal('${userId}')">🚨 举报</button>` : ''}</div>
                     <div class="profile-bio">${profile.bio || '这个人很懒，什么都没写'}</div>
                     <div class="profile-stats">
                         <div class="stat-item"><div class="stat-num">${postCount}</div><div class="stat-label">帖子</div></div>
@@ -4392,39 +4460,105 @@
 
         // ========== 公投审核系统 ==========
 
-        async function loadTrialList() {
-            const homeContent = document.getElementById('home-content');
-            homeContent.innerHTML = `<div style="text-align:center;padding:20px;"><div style="font-size:20px;margin-bottom:10px;">⚖️</div>正在加载公审列表...</div>`;
+        let currentTrialTab = 'post';
+        let reportTargetUserId = null;
+        let selectedUserReportReason = '';
 
-            try {
-                await loadPostTrialList(homeContent);
-            } catch (err) {
-                homeContent.innerHTML = `<div class="empty">加载失败：${err.message}</div>`;
-            }
+        function openReportUserModal(userId) {
+            if (!currentUser) { showMessage('请先登录', 'error'); showLogin(); return; }
+            reportTargetUserId = userId;
+            document.getElementById('report-user-overlay').style.display = 'flex';
         }
 
-        async function loadPostTrialList(homeContent) {
-            const { data: trials, error } = await supabaseClient.rpc('get_active_trials');
-            if (error) throw error;
+        function closeReportUserModal(event) {
+            if (event) event.stopPropagation();
+            document.getElementById('report-user-overlay').style.display = 'none';
+            reportTargetUserId = null;
+            selectedUserReportReason = '';
+            document.querySelectorAll('#report-user-overlay .report-reason-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById('user-report-detail-group').style.display = 'none';
+            document.getElementById('user-report-detail').value = '';
+        }
 
-            let html = `<div style="text-align:center;padding:15px 0 20px;">
-                <div style="font-size:28px;">⚖️</div>
-                <h3 style="color:#0A4D8C;margin:5px 0;">帖子公审庭</h3>
-            </div>`;
+        function selectUserReportReason(reason, el) {
+            selectedUserReportReason = reason;
+            document.querySelectorAll('#report-user-overlay .report-reason-btn').forEach(item => item.classList.remove('active'));
+            el.classList.add('active');
+            document.getElementById('user-report-detail-group').style.display = reason === '其他' ? 'block' : 'none';
+        }
 
-            if (!trials || trials.length === 0) {
-                html += `
-                    <div style="text-align:center;padding:40px;">
-                        <p style="color:#888;">当前没有待审核的帖子</p>
-                        <p style="color:#999;font-size:13px;margin-top:10px;">被举报≥2次的帖子将自动进入公审</p>
-                        <p style="color:#999;font-size:13px;">由超级管理员根据投票情况决定是否下架</p>
-                    </div>
-                `;
-                homeContent.innerHTML = html;
+        async function submitUserReport() {
+            if (!reportTargetUserId || !currentUser || !selectedUserReportReason) {
+                showMessage('请选择举报原因', 'error'); return;
+            }
+
+            const detail = document.getElementById('user-report-detail').value.trim();
+            const reasonText = selectedUserReportReason === '其他' ? detail : selectedUserReportReason;
+            if (!reasonText) { showMessage('请填写详细说明', 'error'); return; }
+
+            const { error } = await supabaseClient.from('user_reports')
+                .insert([{ target_user_id: reportTargetUserId, reporter_id: currentUser.id, reason: reasonText }]);
+            
+            if (error) {
+                if (error.code === '23505') showMessage('您已经举报过该用户了', 'error');
+                else showMessage('举报失败：' + error.message, 'error');
                 return;
             }
 
-            // 获取当前用户已投票的记录
+            showMessage('举报成功，我们会尽快处理', 'success');
+            closeReportUserModal();
+        }
+
+        async function loadTrialList() {
+            const homeContent = document.getElementById('home-content');
+            homeContent.innerHTML = `
+                <div style="text-align:center;padding:15px 0 10px;">
+                    <div style="font-size:28px;">⚖️</div>
+                    <h3 style="color:#0A4D8C;margin:5px 0;">公审大厅</h3>
+                </div>
+                <div class="trial-tabs">
+                    <div class="trial-tab ${currentTrialTab === 'post' ? 'active' : ''}" onclick="switchTrialTab('post')">帖子公审</div>
+                    <div class="trial-tab ${currentTrialTab === 'user' ? 'active' : ''}" onclick="switchTrialTab('user')">用户公审</div>
+                </div>
+                <div id="trial-list-container">
+                    <div style="text-align:center;padding:20px;"><div style="font-size:20px;margin-bottom:10px;">⚖️</div>正在加载列表...</div>
+                </div>
+            `;
+
+            const container = document.getElementById('trial-list-container');
+            try {
+                if (currentTrialTab === 'post') {
+                    await loadPostTrialList(container);
+                } else {
+                    await loadUserTrialList(container);
+                }
+            } catch (err) {
+                container.innerHTML = `<div class="empty">加载失败：${err.message}</div>`;
+            }
+        }
+
+        function switchTrialTab(tab) {
+            if (currentTrialTab === tab) return;
+            currentTrialTab = tab;
+            loadTrialList();
+        }
+
+        async function loadPostTrialList(container) {
+            const { data: trials, error } = await supabaseClient.rpc('get_active_trials');
+            if (error) throw error;
+
+            let html = '';
+            if (!trials || trials.length === 0) {
+                html = `
+                    <div style="text-align:center;padding:40px;">
+                        <p style="color:#888;">当前没有待审核的帖子</p>
+                        <p style="color:#999;font-size:13px;margin-top:10px;">被举报≥2次的帖子将自动进入公审</p>
+                    </div>
+                `;
+                container.innerHTML = html;
+                return;
+            }
+
             let votedMap = {};
             if (currentUser) {
                 const trialIds = trials.map(t => t.trial_id);
@@ -4506,7 +4640,114 @@
                 </div>`;
             }
 
-            homeContent.innerHTML = html;
+            container.innerHTML = html;
+        }
+
+        async function loadUserTrialList(container) {
+            const { data: trials, error } = await supabaseClient.rpc('get_active_user_trials');
+            if (error) {
+                container.innerHTML = `<div class="empty">加载失败：${error.message}</div>`;
+                return;
+            }
+
+            let html = '';
+            if (!trials || trials.length === 0) {
+                html = `
+                    <div style="text-align:center;padding:40px;">
+                        <p style="color:#888;">当前没有待审核的用户</p>
+                        <p style="color:#999;font-size:13px;margin-top:10px;">被举报≥2次的用户将自动进入公审</p>
+                    </div>
+                `;
+                container.innerHTML = html;
+                return;
+            }
+
+            let votedMap = {};
+            if (currentUser) {
+                const trialIds = trials.map(t => t.trial_id);
+                const { data: votes } = await supabaseClient.from('user_trial_votes')
+                    .select('trial_id, verdict')
+                    .eq('user_id', currentUser.id)
+                    .in('trial_id', trialIds);
+                if (votes) votes.forEach(v => { votedMap[v.trial_id] = v.verdict; });
+            }
+
+            const activeCount = trials.filter(t => t.status === 'active').length;
+            html += `<p style="color:#999;font-size:13px;margin-bottom:15px;">${trials.length} 个用户等待处理${activeCount > 0 ? `（${activeCount} 个投票中）` : ''} · 超级管理员可直接处理</p>`;
+
+            const isAdmin = isCurrentUserSuperAdmin();
+
+            for (const t of trials) {
+                const total = (t.ban_count || 0) + (t.innocent_count || 0);
+                const banPct = total > 0 ? ((t.ban_count / total) * 100) : 50;
+                const innocentPct = total > 0 ? ((t.innocent_count / total) * 100) : 50;
+                const myVote = votedMap[t.trial_id] || null;
+                const userName = t.target_username || '匿名';
+                const firstChar = userName.charAt(0);
+                const avatarHtml = t.target_avatar_url
+                    ? `<img src="${t.target_avatar_url}" alt="">`
+                    : firstChar;
+
+                const isActive = t.status === 'active';
+                const isBanned = t.status === 'banned';
+                const badgeClass = isBanned ? 'badge-banned' : (t.status === 'innocent' ? 'badge-innocent' : '');
+                const badgeText = isBanned ? '已封禁' : (t.status === 'innocent' ? '已释放' : '待审');
+
+                const canShowReason = isBanned && t.ban_reason && t.resolved_at;
+                const resolvedTime = t.resolved_at ? new Date(t.resolved_at) : null;
+                const within24Hours = resolvedTime && (Date.now() - resolvedTime.getTime()) < 24 * 60 * 60 * 1000;
+
+                html += `
+                <div class="trial-card">
+                    <div class="trial-card-header">
+                        <div class="avatar">${avatarHtml}</div>
+                        <div>
+                            <div class="trial-card-author">${userName}</div>
+                            <div class="trial-card-time">${formatTime(t.created_at)} 被送审</div>
+                        </div>
+                        ${badgeClass ? `<span class="trial-card-resolved-badge ${badgeClass}">${badgeText}</span>` : `<span class="trial-badge">${badgeText}</span>`}
+                    </div>
+                    ${t.target_bio ? `<div class="trial-card-content">${escapeHtml(t.target_bio)}</div>` : ''}
+                    ${t.report_count > 0 ? `<p style="color:#999;font-size:12px;margin:8px 0;">该用户已被举报 ${t.report_count} 次</p>` : ''}
+                    ${canShowReason && within24Hours ? `
+                        <div class="trial-card-reason">
+                            <strong>封禁原因：</strong>${escapeHtml(t.ban_reason)}
+                        </div>
+                    ` : ''}
+                    <div class="trial-vote-bar">
+                        <div class="trial-vote-count">
+                            <span class="violate-num">${t.ban_count || 0}</span> 封禁 /
+                            <span class="clean-num">${t.innocent_count || 0}</span> 合规
+                        </div>
+                        <div class="trial-progress">
+                            <div class="violate-bar" style="width:${banPct}%"></div>
+                            <div class="clean-bar" style="width:${innocentPct}%"></div>
+                        </div>
+                    </div>
+                    <div class="trial-vote-btns">
+                        ${currentUser && isActive ? `
+                            <button class="btn-violate ${myVote === 'ban' ? 'voted' : ''}"
+                                onclick="castUserTrialVote('${t.trial_id}', 'ban', this)"
+                                ${myVote ? 'disabled' : ''}>
+                                ${myVote === 'ban' ? '✓ 已投封禁' : '🔥 封禁'}
+                            </button>
+                            <button class="btn-clean ${myVote === 'innocent' ? 'voted' : ''}"
+                                onclick="castUserTrialVote('${t.trial_id}', 'innocent', this)"
+                                ${myVote ? 'disabled' : ''}>
+                                ${myVote === 'innocent' ? '✓ 已投合规' : '✅ 合规'}
+                            </button>
+                        ` : (!currentUser && isActive ? '<span style="color:#999;font-size:13px;">登录后可投票</span>' : '<span style="color:#999;font-size:13px;">投票已结束</span>')}
+                    </div>
+                    ${isAdmin && isActive && t.target_user_id ? `
+                        <div class="trial-vote-btns" style="margin-top:10px;">
+                            <button class="btn btn-danger" onclick="adminBanUserTrial('${t.trial_id}', '${t.target_user_id}', event)">🚫 封禁该用户</button>
+                            <button class="btn btn-outline" style="border-color:#999;color:#666;" onclick="adminKeepUserTrial('${t.trial_id}', event)">✅ 释放该用户</button>
+                        </div>
+                    ` : ''}
+                </div>`;
+            }
+
+            container.innerHTML = html;
         }
 
         async function castTrialVote(trialId, verdict, btn) {
@@ -4537,8 +4778,97 @@
             }
 
             showMessage('投票成功！', 'success');
-            // 刷新整个列表以获取最新计数
             loadTrialList();
+        }
+
+        async function castUserTrialVote(trialId, verdict, btn) {
+            if (!currentUser) { showMessage('请先登录', 'error'); return; }
+            if (btn.disabled) return;
+
+            btn.disabled = true;
+            btn.textContent = '投票中...';
+
+            const { data, error } = await supabaseClient.rpc('vote_user_trial', {
+                p_trial_id: trialId,
+                p_user_id: currentUser.id,
+                p_verdict: verdict
+            });
+
+            if (error) {
+                showMessage('投票失败：' + error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = verdict === 'ban' ? '🔥 封禁' : '✅ 合规';
+                return;
+            }
+
+            if (data && data.error) {
+                showMessage(data.error, 'error');
+                btn.disabled = false;
+                btn.textContent = verdict === 'ban' ? '🔥 封禁' : '✅ 合规';
+                return;
+            }
+
+            showMessage('投票成功！', 'success');
+            loadTrialList();
+        }
+
+        async function adminBanUserTrial(trialId, targetUserId, event) {
+            if (event) event.stopPropagation();
+            if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
+            
+            const reason = prompt('请输入封禁原因：', '发布违规内容');
+            if (!reason || !reason.trim()) { showMessage('请输入封禁原因', 'error'); return; }
+            
+            if (!confirm(`确定要封禁该用户吗？封禁后将限制该用户的 IP 和设备访问。\n\n封禁原因：${reason}`)) return;
+
+            try {
+                const { data: banData, error: banError } = await supabaseClient.rpc('ban_user_ip', {
+                    target_user_id: targetUserId,
+                    admin_user_id: currentUser.id,
+                    reason: reason.trim()
+                });
+                if (banError) throw banError;
+                
+                if (!banData?.success) {
+                    showMessage(banData?.error || '封禁失败', 'error');
+                    return;
+                }
+
+                await supabaseClient.rpc('resolve_user_trial', {
+                    p_trial_id: trialId,
+                    admin_user_id: currentUser.id,
+                    p_status: 'banned',
+                    p_reason: reason.trim()
+                });
+
+                showMessage('已封禁该用户并结案', 'success');
+                loadTrialList();
+            } catch (e) {
+                showMessage('操作失败：' + e.message, 'error');
+            }
+        }
+
+        async function adminKeepUserTrial(trialId, event) {
+            if (event) event.stopPropagation();
+            if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
+            if (!confirm('确定要释放该用户吗？该用户将保持正常状态。')) return;
+
+            try {
+                const { data, error } = await supabaseClient.rpc('resolve_user_trial', {
+                    p_trial_id: trialId,
+                    admin_user_id: currentUser.id,
+                    p_status: 'innocent'
+                });
+                if (error) throw error;
+                if (data?.success) {
+                    showMessage('已释放该用户', 'success');
+                    loadTrialList();
+                } else {
+                    showMessage(data?.error || '操作失败', 'error');
+                }
+            } catch (e) {
+                showMessage('操作失败：' + e.message, 'error');
+            }
         }
 
         async function adminDeleteTrialPost(trialId, event) {
