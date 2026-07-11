@@ -6,6 +6,7 @@
     <title>散帅啤酒馆</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1455,6 +1456,9 @@
                 <label>昵称</label>
                 <input type="text" id="register-nickname" placeholder="请输入昵称">
             </div>
+            <div class="form-group">
+                <div id="turnstile-widget"></div>
+            </div>
             <button class="btn btn-primary" onclick="handleRegister()">注册</button>
             <div class="switch">已有账号？<a onclick="showLogin()">立即登录</a></div>
         </div>
@@ -1498,12 +1502,16 @@
     <script>
         const SUPABASE_URL = 'https://vmdwztwwdfmqheqfcdbn.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZtZHd6dHd3ZGZtcWhlcWZjZGJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDM5MDksImV4cCI6MjA5Nzg3OTkwOX0.e3xYd3dLgUdthr6kAHvUKqQOeNiLClk1-sIPmraNkf8';
+        // Cloudflare Turnstile 站点密钥
+        const TURNSTILE_SITE_KEY = '0x4AAAAAADzd4dYpPkQr5-_T';
 
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
             auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
         });
 
         let currentUser = null;
+        let turnstileToken = null;
+        let turnstileWidgetId = null;
         let selectedImages = [];
         let currentHomeTab = 'latest';
         let currentDetailPostId = null;
@@ -1619,7 +1627,33 @@
         }
 
         function showLogin() { showPage('page-login'); }
-        function showRegister() { showPage('page-register'); }
+        function showRegister() {
+            showPage('page-register');
+            renderTurnstile();
+        }
+
+        function renderTurnstile() {
+            if (typeof turnstile === 'undefined') return;
+            const container = document.getElementById('turnstile-widget');
+            if (!container) return;
+            if (turnstileWidgetId !== null) {
+                turnstile.reset(turnstileWidgetId);
+                return;
+            }
+            turnstileWidgetId = turnstile.render('#turnstile-widget', {
+                sitekey: TURNSTILE_SITE_KEY,
+                callback: (token) => { turnstileToken = token; },
+                'expired-callback': () => { turnstileToken = null; },
+                'error-callback': () => { turnstileToken = null; }
+            });
+        }
+
+        function resetTurnstile() {
+            turnstileToken = null;
+            if (turnstileWidgetId !== null && typeof turnstile !== 'undefined') {
+                turnstile.reset(turnstileWidgetId);
+            }
+        }
 
         function updateHomeTabsUI() {
             document.querySelectorAll('#home-tabs button').forEach(btn => {
@@ -2048,6 +2082,7 @@
             const nickname = document.getElementById('register-nickname').value.trim();
             if (!phone || !password || !nickname) { showMessage('请填写完整信息', 'error'); return; }
             if (password.length < 6) { showMessage('密码至少需要6位', 'error'); return; }
+            if (!turnstileToken) { showMessage('请先完成人机验证', 'error'); return; }
             const deviceId = getOrCreateDeviceId();
             try {
                 const { data: banData, error: banError } = await supabaseClient.rpc('check_device_banned', { check_device: deviceId });
@@ -2056,9 +2091,14 @@
             } catch (e) { showMessage('设备检查失败：' + e.message, 'error'); return; }
             const email = `${phone}@bigblue.com`;
             const { data, error } = await supabaseClient.auth.signUp({
-                email, password, options: { data: { phone, nickname } }
+                email, password, options: { data: { phone, nickname }, captchaToken: turnstileToken }
             });
-            if (error) { showMessage('注册失败：' + error.message, 'error'); return; }
+            if (error) {
+                resetTurnstile();
+                showMessage('注册失败：' + error.message, 'error');
+                return;
+            }
+            turnstileToken = null;
             currentUser = data.user;
             await createProfile(nickname, phone);
             await trackUserIp();
