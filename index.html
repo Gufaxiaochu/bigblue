@@ -10,6 +10,7 @@
     <script src="cloudbase/js/cloudbase-api.js"></script>
     <script src="cloudbase/js/migrate-images.js"></script>
     <script src="cloudbase/js/test-migrate.js"></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -1437,6 +1438,9 @@
                 <label>昵称</label>
                 <input type="text" id="register-nickname" placeholder="请输入昵称">
             </div>
+            <div class="form-group">
+                <div id="turnstile-widget"></div>
+            </div>
             <button class="btn btn-primary" onclick="handleRegister()">注册</button>
             <div class="switch">已有账号？<a onclick="showLogin()">立即登录</a></div>
         </div>
@@ -1598,8 +1602,23 @@
             }
         }
 
+        let turnstileWidgetId = null;
+
         function showLogin() { showPage('page-login'); }
-        function showRegister() { showPage('page-register'); }
+        function showRegister() {
+            showPage('page-register');
+            if (window.turnstile) {
+                if (turnstileWidgetId) {
+                    turnstile.reset(turnstileWidgetId);
+                } else {
+                    turnstileWidgetId = turnstile.render('#turnstile-widget', {
+                        sitekey: '0x4AAAAAADzd4dYpPkQr5-_T',
+                        theme: 'light',
+                        size: 'normal',
+                    });
+                }
+            }
+        }
 
         function navigateHome() {
             currentHomeTab = 'latest';
@@ -2005,6 +2024,29 @@
             const nickname = document.getElementById('register-nickname').value.trim();
             if (!phone || !password || !nickname) { showMessage('请填写完整信息', 'error'); return; }
             if (password.length < 6) { showMessage('密码至少需要6位', 'error'); return; }
+            
+            if (!window.turnstile) { showMessage('验证码加载失败，请刷新页面', 'error'); return; }
+            const turnstileToken = turnstile.getResponse();
+            if (!turnstileToken) { showMessage('请完成验证码验证', 'error'); return; }
+            
+            if (!window.cbApp) { showMessage('服务初始化中，请稍后重试', 'error'); return; }
+            
+            try {
+                const verifyResult = await cbApp.callFunction({
+                    name: 'auth',
+                    data: { action: 'verifyTurnstile', token: turnstileToken }
+                });
+                if (verifyResult.result.error) {
+                    showMessage('验证码验证失败：' + verifyResult.result.error, 'error');
+                    turnstile.reset();
+                    return;
+                }
+            } catch (e) {
+                showMessage('验证码验证失败：' + e.message, 'error');
+                turnstile.reset();
+                return;
+            }
+            
             const deviceId = getOrCreateDeviceId();
             try {
                 const { data: banData, error: banError } = await supabaseClient.rpc('check_device_banned', { check_device: deviceId });
@@ -2015,7 +2057,7 @@
             const { data, error } = await supabaseClient.auth.signUp({
                 email, password, options: { data: { phone, nickname } }
             });
-            if (error) { showMessage('注册失败：' + error.message, 'error'); return; }
+            if (error) { showMessage('注册失败：' + error.message, 'error'); turnstile.reset(); return; }
             currentUser = data.user;
             await createProfile(nickname, phone);
             await trackUserIp();
@@ -2024,6 +2066,7 @@
             startMessagePolling();
             navigateHome();
             updateNav();
+            turnstile.reset();
         }
 
         async function createProfile(nickname, phone) {

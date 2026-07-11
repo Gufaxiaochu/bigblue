@@ -11,6 +11,8 @@ const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 
+const TURNSILE_SECRET_KEY = '0x4AAAAAADzd4ceE1MaOLsShkmINzikuz3U';
+
 // 初始化 CloudBase
 const app = cloudbase.init({
     env: process.env.CLOUDBASE_ENV_ID || 'cmfootball-d3gp9t11528eabd1f'
@@ -68,6 +70,7 @@ exports.main = async (event, context) => {
             case 'logout': return await handleLogout(event);
             case 'updatePassword': return await handleUpdatePassword(event);
             case 'getUser': return await handleGetUser(event);
+            case 'verifyTurnstile': return await handleVerifyTurnstile(event);
             default: return { error: '未知操作: ' + action };
         }
     } catch (err) {
@@ -242,4 +245,58 @@ async function handleGetUser(event) {
             avatar_url: profile.avatar_url || null
         }
     };
+}
+
+async function handleVerifyTurnstile(event) {
+    const { token } = event;
+    if (!token) return { error: '验证码不能为空' };
+    
+    try {
+        const https = require('https');
+        const querystring = require('querystring');
+        
+        const postData = querystring.stringify({
+            secret: TURNSILE_SECRET_KEY,
+            response: token
+        });
+        
+        const options = {
+            hostname: 'challenges.cloudflare.com',
+            path: '/turnstile/v0/siteverify',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(postData)
+            }
+        };
+        
+        return new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
+                res.on('end', () => {
+                    try {
+                        const result = JSON.parse(data);
+                        if (result.success) {
+                            resolve({ success: true });
+                        } else {
+                            resolve({ error: '验证码验证失败' });
+                        }
+                    } catch (e) {
+                        resolve({ error: '验证响应解析失败' });
+                    }
+                });
+            });
+            
+            req.on('error', (e) => {
+                resolve({ error: '验证码验证网络错误' });
+            });
+            
+            req.write(postData);
+            req.end();
+        });
+    } catch (e) {
+        console.error('Turnstile verify error:', e);
+        return { error: '验证码验证失败' };
+    }
 }
