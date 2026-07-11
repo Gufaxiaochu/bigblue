@@ -1,0 +1,9 @@
+{
+  "name": "verify-code",
+  "version": "1.0.0",
+  "description": "验证邮箱验证码",
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.9.0"
+  }
+}
