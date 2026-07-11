@@ -2,7 +2,7 @@
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO profiles (id, username, phone, bio)
+    INSERT INTO profiles (id, username, email, bio)
     VALUES (
         NEW.id,
         COALESCE(
@@ -10,7 +10,7 @@ BEGIN
             NEW.raw_user_meta_data->>'username',
             '用户' || substr(NEW.id::text, 1, 8)
         ),
-        NEW.raw_user_meta_data->>'phone',
+        NEW.email,
         ''
     )
     ON CONFLICT (id) DO NOTHING;

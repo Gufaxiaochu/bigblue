@@ -2115,6 +2115,16 @@
                     return;
                 }
                 sessionStorage.removeItem('email_code_' + email);
+                // 检查昵称是否重复
+                const { data: existingUser, error: checkError } = await supabaseClient
+                    .from('profiles')
+                    .select('id')
+                    .eq('username', nickname)
+                    .maybeSingle();
+                if (existingUser) {
+                    showMessage('该昵称已被使用，请换一个', 'error');
+                    return;
+                }
                 // 注册账号
                 console.log('[注册] 开始 Supabase signUp');
                 const { data, error } = await supabaseClient.auth.signUp({
@@ -2145,10 +2155,41 @@
         }
 
         async function createProfile(nickname, email) {
-            const { error } = await supabaseClient.from('profiles').upsert([
-                { id: currentUser.id, username: nickname, email, bio: '', avatar_url: null }
-            ], { onConflict: 'id' });
-            if (error) console.error('创建资料失败:', error);
+            // 重试逻辑：等待会话建立后创建/更新 profile
+            for (let attempt = 0; attempt < 5; attempt++) {
+                // 检查是否有有效会话
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session && session.user) {
+                    currentUser = session.user;
+                    break;
+                }
+                if (attempt < 4) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
+
+            // 首先检查 profile 是否已存在（可能由触发器创建）
+            const { data: existingProfile } = await supabaseClient.from('profiles')
+                .select('id')
+                .eq('id', currentUser.id)
+                .maybeSingle();
+
+            if (existingProfile) {
+                // profile 已存在，尝试更新用户名和邮箱（如果需要）
+                await supabaseClient.from('profiles')
+                    .update({ username: nickname, email: email })
+                    .eq('id', currentUser.id);
+            } else {
+                // profile 不存在，尝试创建
+                const { error } = await supabaseClient.from('profiles').insert([
+                    { id: currentUser.id, username: nickname, email, bio: '', avatar_url: null }
+                ]);
+                if (error) {
+                    console.error('创建资料失败:', error);
+                    // 如果创建失败，提示用户重新登录
+                    showMessage('账号已创建，请重新登录以完成设置', 'error');
+                }
+            }
             await loadUserProfile();
         }
 
