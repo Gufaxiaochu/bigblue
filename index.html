@@ -6,10 +6,7 @@
     <title>散帅啤酒馆</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://static.cloudbase.net/cloudbase-js-sdk/latest/cloudbase.full.js"></script>
-    <script src="cloudbase/js/cloudbase-api.js"></script>
-    <script src="cloudbase/js/migrate-images.js"></script>
-    <script src="cloudbase/js/test-migrate.js"></script>
+
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -4059,9 +4056,10 @@
                 try { imageFile = await compressImage(file, 800); } catch (e) { /* 用原图 */ }
                 const ext = file.name.split('.').pop() || 'jpg';
                 const filePath = `${currentUser.id}/edit_${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-                const { data: uploadData, error: uploadError } = await CloudBaseAPI.uploadFile(filePath, imageFile);
+                const { error: uploadError } = await supabaseClient.storage.from('posts').upload(filePath, imageFile);
                 if (uploadError) { showMessage('图片上传失败', 'error'); continue; }
-                editPostImages.push(uploadData.url);
+                const { data: urlData } = supabaseClient.storage.from('posts').getPublicUrl(filePath);
+                editPostImages.push(urlData.publicUrl);
             }
 
             renderEditPostImagesPreview();
