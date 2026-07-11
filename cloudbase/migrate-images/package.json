@@ -1,0 +1,10 @@
+{
+  "name": "migrate-images",
+  "version": "1.0.0",
+  "description": "将 Supabase Storage 图片迁移到 CloudBase",
+  "main": "migrate.js",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0",
+    "@cloudbase/node-sdk": "^3.0.0"
+  }
+}

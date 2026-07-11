@@ -1,0 +1,9 @@
+{
+  "name": "migrate-images",
+  "version": "1.0.0",
+  "description": "批量迁移 Supabase Storage 图片到 CloudBase COS",
+  "main": "index.js",
+  "dependencies": {
+    "cos-nodejs-sdk-v5": "^2.14.0"
+  }
+}
