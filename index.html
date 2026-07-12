@@ -380,17 +380,27 @@
         .hot-meta { display: flex; gap: 12px; font-size: 12px; color: #999; }
 
         /* 首页 Tab 栏 */
+        .home-user-count {
+            width: 100%;
+            text-align: center;
+            font-size: 12px;
+            color: #999;
+            padding-bottom: 8px;
+        }
         .home-tabs {
-            display: flex; gap: 10px; padding: 12px 20px; background: #fff;
+            padding: 12px 20px; background: #fff;
             border-bottom: 1px solid #E6F0FF;
         }
-        .home-tabs button {
+        .home-tabs-buttons {
+            display: flex; gap: 10px;
+        }
+        .home-tabs-buttons button {
             flex: 1; padding: 8px 0; border: none; border-radius: 20px;
             background: #F0F7FF; color: #0A4D8C; font-size: 14px; font-weight: 600;
             cursor: pointer; transition: all 0.2s;
         }
-        .home-tabs button:hover { background: #E6F0FF; }
-        .home-tabs button.active {
+        .home-tabs-buttons button:hover { background: #E6F0FF; }
+        .home-tabs-buttons button.active {
             background: linear-gradient(135deg, #0066FF 0%, #00CCFF 100%);
             color: white; box-shadow: 0 2px 8px rgba(0, 102, 255, 0.25);
         }
@@ -1389,9 +1399,12 @@
                 <span class="home-pull-text">下拉刷新</span>
             </div>
             <div class="home-tabs" id="home-tabs">
-                <button class="active" data-tab="latest" onclick="switchHomeTab('latest')">最新</button>
-                <button data-tab="hot" onclick="switchHomeTab('hot')">今日热榜</button>
-                <button data-tab="featured" onclick="switchHomeTab('featured')">精选</button>
+                <div class="home-user-count" id="home-user-count">已注册人数：加载中...</div>
+                <div class="home-tabs-buttons">
+                    <button class="active" data-tab="latest" onclick="switchHomeTab('latest')">最新</button>
+                    <button data-tab="hot" onclick="switchHomeTab('hot')">今日热榜</button>
+                    <button data-tab="featured" onclick="switchHomeTab('featured')">精选</button>
+                </div>
             </div>
             <div id="home-content"></div>
         </div>
@@ -2103,8 +2116,10 @@
             const text = error ? '当前已注册用户：未知' : `当前已注册用户：${count || 0}人`;
             const el1 = document.getElementById('user-count');
             const el2 = document.getElementById('search-user-count');
+            const homeEl = document.getElementById('home-user-count');
             if (el1) el1.textContent = text;
             if (el2) el2.textContent = text;
+            if (homeEl) homeEl.textContent = error ? '已注册人数：未知' : `已注册人数：${count || 0}`;
         }
 
         async function handleLogin() {
