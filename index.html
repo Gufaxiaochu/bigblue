@@ -4925,6 +4925,7 @@
                     return;
                 }
 
+<<<<<<< HEAD
                 const { data: resolveData, error: resolveError } = await supabaseClient.rpc('resolve_user_trial', {
                     p_trial_id: trialId,
                     p_admin_user_id: currentUser.id,
@@ -4936,6 +4937,14 @@
                     showMessage(resolveData?.error || '结案失败', 'error');
                     return;
                 }
+=======
+                await supabaseClient.rpc('resolve_user_trial', {
+                    p_trial_id: trialId,
+                    admin_user_id: currentUser.id,
+                    p_status: 'banned',
+                    p_reason: reason.trim()
+                });
+>>>>>>> 22965584e6db9eec1041a3b1eab728f72635520f
 
                 showMessage('已封禁该用户并结案', 'success');
                 loadTrialList();
@@ -4952,7 +4961,11 @@
             try {
                 const { data, error } = await supabaseClient.rpc('resolve_user_trial', {
                     p_trial_id: trialId,
+<<<<<<< HEAD
                     p_admin_user_id: currentUser.id,
+=======
+                    admin_user_id: currentUser.id,
+>>>>>>> 22965584e6db9eec1041a3b1eab728f72635520f
                     p_status: 'innocent'
                 });
                 if (error) throw error;
