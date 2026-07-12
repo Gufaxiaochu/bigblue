@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>散帅啤酒馆</title>
+    <script src="https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@4/dist/fp.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -2290,19 +2291,36 @@
             }
         }
 
-        function getOrCreateDeviceId() {
-            let deviceId = localStorage.getItem('device_id');
-            if (!deviceId) {
-                deviceId = 'dev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 12);
-                localStorage.setItem('device_id', deviceId);
+        let deviceId = null;
+
+        async function initDeviceId() {
+            let storedId = localStorage.getItem('device_id');
+            if (storedId && !storedId.startsWith('dev_')) {
+                deviceId = storedId;
+                return;
             }
-            return deviceId;
+
+            try {
+                const fp = await FingerprintJS.load();
+                const result = await fp.get();
+                deviceId = result.visitorId;
+                localStorage.setItem('device_id', deviceId);
+            } catch (e) {
+                console.error('FingerprintJS加载失败，使用备用方案', e);
+                deviceId = storedId || 'dev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 12);
+                if (!storedId) localStorage.setItem('device_id', deviceId);
+            }
+        }
+
+        function getDeviceId() {
+            return deviceId || localStorage.getItem('device_id');
         }
 
         async function trackUserIp() {
             if (!currentUser) return;
+            await initDeviceId();
             const ip = await getUserIp();
-            const deviceId = getOrCreateDeviceId();
+            const deviceId = getDeviceId();
             try {
                 if (ip) {
                     await supabaseClient.rpc('update_user_ip', { user_id: currentUser.id, user_ip: ip });
@@ -2312,8 +2330,9 @@
         }
 
         async function checkIpBanned() {
+            await initDeviceId();
             const ip = await getUserIp();
-            const deviceId = getOrCreateDeviceId();
+            const deviceId = getDeviceId();
             try {
                 if (ip) {
                     const { data, error } = await supabaseClient.rpc('check_ip_banned', { check_ip: ip });
