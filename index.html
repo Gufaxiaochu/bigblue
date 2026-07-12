@@ -121,7 +121,7 @@
         .ticker-bar {
             background: linear-gradient(90deg, #0A4D8C 0%, #0066FF 100%);
             color: white; overflow: hidden; white-space: nowrap;
-            padding: 6px 0; font-size: 13px; position: relative;
+            padding: 6px 0; font-size: 13px; position: sticky; top: 56px; z-index: 100;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
         }
         .ticker-bar .ticker-label {
@@ -2327,28 +2327,25 @@
                 }
             }
 
-            // 首先检查 profile 是否已存在（可能由触发器创建）
-            const { data: existingProfile } = await supabaseClient.from('profiles')
-                .select('id')
-                .eq('id', currentUser.id)
-                .maybeSingle();
-
-            if (existingProfile) {
-                // profile 已存在，尝试更新用户名和邮箱（如果需要）
-                await supabaseClient.from('profiles')
-                    .update({ username: nickname, email: email })
-                    .eq('id', currentUser.id);
-            } else {
-                // profile 不存在，尝试创建
-                const { error } = await supabaseClient.from('profiles').insert([
-                    { id: currentUser.id, username: nickname, email, bio: '', avatar_url: null }
-                ]);
-                if (error) {
-                    console.error('创建资料失败:', error);
-                    // 如果创建失败，提示用户重新登录
-                    showMessage('账号已创建，请重新登录以完成设置', 'error');
-                }
+            if (!currentUser) {
+                console.error('无法获取用户会话');
+                throw new Error('无法获取用户会话');
             }
+
+            // 使用 RPC 函数创建 profile（绕过 RLS）
+            console.log('[createProfile] 使用 RPC 创建 profile, userId:', currentUser.id, 'nickname:', nickname);
+            const { error: rpcError } = await supabaseClient.rpc('create_user_profile', {
+                p_user_id: currentUser.id,
+                p_username: nickname,
+                p_email: email
+            });
+
+            if (rpcError) {
+                console.error('[createProfile] RPC 失败:', rpcError);
+                throw rpcError;
+            }
+
+            console.log('[createProfile] RPC 成功');
             await loadUserProfile();
         }
 
@@ -3224,9 +3221,9 @@
                 ? `<div class="lazy-img-placeholder" style="background:${getRandomCoverColor()}" data-placeholder><span>${placeholderText}</span></div>`
                 : `<div class="lazy-img-spinner"></div>`;
             return `
-                <div class="lazy-img-wrap" ${heightStyle}>
+                <div class="lazy-img-wrap" ${heightStyle} ${onclick}>
                     ${placeholderHtml}
-                    <img src="${src}" alt="${alt || ''}" ${onclick} loading="lazy" decoding="async" onload="this.classList.add('loaded'); this.closest('.lazy-img-wrap').classList.add('loaded');" onerror="this.closest('.lazy-img-wrap').classList.add('loaded'); this.style.opacity='0.2';">
+                    <img src="${src}" alt="${alt || ''}" loading="lazy" decoding="async" onload="this.classList.add('loaded'); this.closest('.lazy-img-wrap').classList.add('loaded');" onerror="this.closest('.lazy-img-wrap').classList.add('loaded'); this.style.opacity='0.2';">
                 </div>
             `;
         }
@@ -3493,7 +3490,10 @@
             const authorName = post.profiles?.username || '匿名';
             const authorAvatar = post.profiles?.avatar_url;
             const firstChar = authorName.charAt(0);
-            const images = post.image_urls || [];
+            const thumbnails = post.thumbnail_urls || [];
+            const fullImages = post.image_urls || [];
+            // 显示缩略图，点击查看原图
+            const displayImages = thumbnails.length > 0 ? thumbnails : fullImages;
             currentDetailPostObj = post;
             const hasPoll = post.poll_options && post.poll_options.length > 0;
 
@@ -3530,9 +3530,9 @@
                     <div class="post-title-text">${post.title}${getContentTypeBadge(post)}</div>
                     ${renderPostContent(post)}
                     ${hasPoll ? '<div id="poll-container"><div class="poll-loading">加载投票中...</div></div>' : ''}
-                    ${images.length > 0 ? `
+                    ${displayImages.length > 0 ? `
                         <div class="post-images">
-                            ${images.map(url => renderLazyImg(getResizedImageUrl(url, 1200), '图片', url, 250)).join('')}
+                            ${displayImages.map((thumb, i) => renderLazyImg(thumb, '图片', fullImages[i] || thumb, 250)).join('')}
                         </div>
                     ` : ''}
                     <div class="post-footer">
@@ -3553,7 +3553,6 @@
                 </div>
                 <div class="comments-section">
                     <div class="comments-title">💬 评论</div>
-                    <div id="comments-list">${commentsHTML}</div>
                     ${currentUser ? `
                         <div class="comment-input-area">
                             <input type="text" id="comment-input" placeholder="写下你的评论..." onkeypress="if(event.key==='Enter') submitComment()">
@@ -3563,6 +3562,7 @@
                         <input type="file" id="comment-image-input" accept="image/*" multiple style="display:none" onchange="handleCommentImageSelect(event)">
                         <div id="comment-img-preview" class="comment-img-preview"></div>
                     ` : '<div style="text-align:center;padding:15px;color:#888;font-size:14px;">登录后可发表评论</div>'}
+                    <div id="comments-list">${commentsHTML}</div>
                 </div>
             `;
 
