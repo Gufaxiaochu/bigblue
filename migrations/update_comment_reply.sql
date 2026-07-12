@@ -31,3 +31,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- 触发器已存在，无需重建（函数体更新即可生效）
+-- 我去存在你个蛋，你用的agent不简单，byd没创建还说存在
+CREATE TRIGGER on_comment_notification
+    AFTER INSERT ON comments
+    FOR EACH ROW EXECUTE FUNCTION create_comment_notification();
