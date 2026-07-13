@@ -79,7 +79,7 @@ RETURNS TABLE (
 BEGIN
     RETURN QUERY
     SELECT
-        ct.id as trial_id,
+        ct.trial_id as trial_id,
         ct.comment_id,
         ct.post_id,
         c.content as comment_content,
@@ -92,17 +92,17 @@ BEGIN
         ct.innocent_count,
         ct.resolved_at,
         ct.ban_reason,
-        COALESCE(r.report_count, 0) as report_count,
+        COALESCE(comment_reports.report_count, 0) as report_count,
         ct.created_at
     FROM comment_trials ct
     JOIN comments c ON ct.comment_id = c.id
     JOIN posts p ON ct.post_id = p.id
     JOIN profiles prof ON c.user_id = prof.id
-    LEFT JOIN (
-        SELECT comment_id, COUNT(*) as report_count
+        LEFT JOIN (
+        SELECT comment_reports.comment_id, COUNT(*) as report_count
         FROM comment_reports
-        GROUP BY comment_id
-    ) r ON ct.comment_id = r.comment_id
+        GROUP BY comment_reports.comment_id
+    )  comment_reports ON ct.comment_id = comment_reports.comment_id
     WHERE ct.status = 'active' OR (ct.status IN ('banned', 'innocent') AND ct.resolved_at > NOW() - INTERVAL '24 hours')
     ORDER BY ct.created_at DESC;
 END;
