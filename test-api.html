@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 测试</title>
+    <!-- Cloudbase SDK - 官方 CDN -->
+    <script src="https://static.cloudbase.net/cloudbase-js-sdk/latest/cloudbase.full.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-item {
+            background: white;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #1890ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #40a9ff; }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .success { color: #52c41a; }
+        .error { color: #ff4d4f; }
+    </style>
+</head>
+<body>
+    <h1>Cloudbase API 测试</h1>
+
+    <div class="test-item">
+        <h3>1. 初始化 SDK</h3>
+        <button onclick="testInit()">测试初始化</button>
+        <div id="init-result" class="result"></div>
+    </div>
+
+    <div class="test-item">
+        <h3>2. 调用云函数（无参数）</h3>
+        <button onclick="testCallFunction()">测试调用</button>
+        <button onclick="checkLoginState()">诊断登录态</button>
+        <div id="call-result" class="result"></div>
+    </div>
+
+    <div class="test-item">
+        <h3>3. 获取帖子列表</h3>
+        <button onclick="testGetPosts()">获取帖子</button>
+        <div id="posts-result" class="result"></div>
+    </div>
+
+    <div class="test-item">
+        <h3>4. 获取热榜</h3>
+        <button onclick="testGetHot()">获取热榜</button>
+        <div id="hot-result" class="result"></div>
+    </div>
+
+    <div class="test-item">
+        <h3>5. 注册测试</h3>
+        <input type="text" id="reg-phone" placeholder="手机号" value="13800138000">
+        <input type="password" id="reg-pass" placeholder="密码" value="test123456">
+        <input type="text" id="reg-name" placeholder="昵称" value="测试用户">
+        <button onclick="testRegister()">注册</button>
+        <div id="reg-result" class="result"></div>
+    </div>
+
+    <script>
+        let app = null;
+        const ENV_ID = 'cmfootball-d3gp9t11528eabd1f';
+
+        function testInit() {
+            try {
+                // 官方 SDK 使用 cloudbase（小写）
+                app = cloudbase.init({
+                    env: ENV_ID,
+                    region: 'ap-shanghai'
+                });
+                document.getElementById('init-result').innerHTML = 
+                    '<span class="success">✓ SDK 初始化成功</span>\n' +
+                    '环境ID: ' + ENV_ID + '\n正在尝试匿名登录...';
+                
+                // 匿名登录（SDK 2.x 正确语法）
+                const auth = app.auth();
+                auth.signInAnonymously().then(() => {
+                    document.getElementById('init-result').innerHTML = 
+                        '<span class="success">✓ SDK 初始化成功</span>\n' +
+                        '环境ID: ' + ENV_ID + '\n' +
+                        '<span class="success">✓ 匿名登录成功</span>';
+                }).catch(err => {
+                    document.getElementById('init-result').innerHTML = 
+                        '<span class="success">✓ SDK 初始化成功</span>\n' +
+                        '环境ID: ' + ENV_ID + '\n' +
+                        '<span class="error">✗ 匿名登录失败: ' + err.message + '</span>\n' +
+                        '请确认 CloudBase 控制台已开启「匿名登录」';
+                });
+            } catch (err) {
+                document.getElementById('init-result').innerHTML = 
+                    '<span class="error">✗ 初始化失败: ' + err.message + '</span>';
+            }
+        }
+
+        async function checkLoginState() {
+            if (!app) {
+                document.getElementById('call-result').innerHTML = 
+                    '<span class="error">请先初始化 SDK</span>';
+                return;
+            }
+            try {
+                const state = await app.auth().getLoginState();
+                document.getElementById('call-result').innerHTML = 
+                    '<span class="success">✓ 登录态诊断</span>\n' +
+                    JSON.stringify({
+                        isAnonymous: state?.isAnonymous,
+                        isAnonymousAuth: state?.isAnonymousAuth,
+                        hasUser: !!state?.user,
+                        userId: state?.user?.uid,
+                        hasCredentials: !!(state?.credentials?.accessToken || state?.accessToken),
+                        env: ENV_ID
+                    }, null, 2) + '\n\n' +
+                    '如果 hasCredentials 为 false，说明匿名登录没拿到凭证。';
+            } catch (err) {
+                document.getElementById('call-result').innerHTML = 
+                    '<span class="error">✗ 诊断失败: ' + err.message + '</span>';
+            }
+        }
+
+        async function testCallFunction() {
+            if (!app) {
+                document.getElementById('call-result').innerHTML = 
+                    '<span class="error">请先初始化 SDK</span>';
+                return;
+            }
+
+            try {
+                const result = await app.callFunction({
+                    name: 'api',
+                    data: { action: 'posts/list', limit: 5 }
+                });
+
+                document.getElementById('call-result').innerHTML = 
+                    '<span class="success">✓ 云函数调用成功</span>\n' +
+                    JSON.stringify(result, null, 2);
+            } catch (err) {
+                console.error('云函数调用错误:', err);
+                const isAuthError = err?.message?.includes('unauthenticated') || err?.code?.includes('PERMISSION') || err?.error === 'unauthenticated';
+                document.getElementById('call-result').innerHTML = 
+                    '<span class="error">✗ 调用失败</span>\n' +
+                    '错误对象: ' + JSON.stringify(err, Object.getOwnPropertyNames(err), 2) + '\n' +
+                    'message: ' + err.message + '\n' +
+                    'stack: ' + err.stack + '\n\n' +
+                    (isAuthError ?
+                        '<span class="error">权限提示：</span>匿名用户没有调用「api」云函数的权限。\n' +
+                        '请去 CloudBase 控制台 → 环境 → 云函数 → api → 权限/访问权限 → 允许匿名用户调用。\n' +
+                        '或者先点上面的「诊断登录态」按钮查看凭证是否拿到。' : '');
+            }
+        }
+
+        async function testGetPosts() {
+            if (!app) {
+                document.getElementById('posts-result').innerHTML = 
+                    '<span class="error">请先初始化 SDK</span>';
+                return;
+            }
+
+            try {
+                const result = await app.callFunction({
+                    name: 'api',
+                    data: { action: 'posts/list', limit: 5 }
+                });
+
+                if (result.result && result.result.success) {
+                    const posts = result.result.data || [];
+                    document.getElementById('posts-result').innerHTML = 
+                        '<span class="success">✓ 获取成功，共 ' + posts.length + ' 条帖子</span>\n' +
+                        posts.map(p => '- ' + (p.title || '无标题')).join('\n');
+                } else {
+                    document.getElementById('posts-result').innerHTML = 
+                        '<span class="error">✗ 获取失败: ' + JSON.stringify(result.result) + '</span>';
+                }
+            } catch (err) {
+                document.getElementById('posts-result').innerHTML = 
+                    '<span class="error">✗ 调用失败: ' + err.message + '</span>';
+            }
+        }
+
+        async function testGetHot() {
+            if (!app) {
+                document.getElementById('hot-result').innerHTML = 
+                    '<span class="error">请先初始化 SDK</span>';
+                return;
+            }
+
+            try {
+                const result = await app.callFunction({
+                    name: 'api',
+                    data: { action: 'posts/hot', limit: 10 }
+                });
+
+                document.getElementById('hot-result').innerHTML = 
+                    '<span class="success">✓ 热榜调用结果</span>\n' +
+                    JSON.stringify(result.result, null, 2);
+            } catch (err) {
+                document.getElementById('hot-result').innerHTML = 
+                    '<span class="error">✗ 调用失败: ' + err.message + '</span>';
+            }
+        }
+
+        async function testRegister() {
+            if (!app) {
+                document.getElementById('reg-result').innerHTML = 
+                    '<span class="error">请先初始化 SDK</span>';
+                return;
+            }
+
+            const phone = document.getElementById('reg-phone').value;
+            const password = document.getElementById('reg-pass').value;
+            const nickname = document.getElementById('reg-name').value;
+
+            try {
+                const result = await app.callFunction({
+                    name: 'api',
+                    data: { 
+                        action: 'auth/register', 
+                        phone, 
+                        password, 
+                        nickname 
+                    }
+                });
+
+                document.getElementById('reg-result').innerHTML = 
+                    '<span class="success">✓ 注册调用结果</span>\n' +
+                    JSON.stringify(result.result, null, 2);
+            } catch (err) {
+                document.getElementById('reg-result').innerHTML = 
+                    '<span class="error">✗ 调用失败: ' + err.message + '</span>';
+            }
+        }
+
+        // 页面加载完成后初始化
+        window.onload = function() {
+            // 等待 SDK 加载
+            if (typeof cloudbase === 'undefined') {
+                document.getElementById('init-result').innerHTML = 
+                    '<span class="error">✗ SDK 加载失败，请检查网络</span>';
+                return;
+            }
+            testInit();
+        };
+    </script>
+</body>
+</html>

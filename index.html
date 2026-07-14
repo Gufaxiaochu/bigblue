@@ -8,6 +8,9 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Cloudbase SDK -->
+    <script src="https://static.cloudbase.net/cloudbase-js-sdk/latest/cloudbase.full.js"></script>
+    <script src="api.js"></script>
 
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -839,10 +842,11 @@
         .comment-author:hover { text-decoration: underline; }
         .comment-text { color: #333; font-size: 14px; line-height: 1.5; margin-bottom: 4px; }
         .comment-time { color: #999; font-size: 12px; }
-        .comment-actions { display: flex; gap: 12px; margin-top: 4px; }
+        .comment-actions { display: flex; gap: 12px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
         .comment-action-btn {
             background: none; border: none; color: #888; font-size: 12px;
             cursor: pointer; padding: 2px 4px;
+            flex-shrink: 0; white-space: nowrap;
         }
         .comment-action-btn:hover { color: #0066FF; }
         .reply-quote {
@@ -1503,10 +1507,10 @@
         </div>
 
         <div id="page-login" class="page hidden">
-            <div class="page-title">🔐 登录</div>
+            <div class="page-title">🔐 登录（服务器已更换，旧帐号全部不可用，请重新注册！）</div>
             <div class="form-group">
-                <label>邮箱</label>
-                <input type="email" id="login-email" placeholder="请输入邮箱">
+                <label>邮箱或手机号</label>
+                <input type="text" id="login-email" placeholder="请输入邮箱或手机号">
             </div>
             <div class="form-group">
                 <label>密码</label>
@@ -1514,7 +1518,7 @@
             </div>
             <button class="btn btn-primary" onclick="handleLogin()">登录</button>
             <div class="login-tip" style="margin-top: 15px; text-align: center; font-size: 13px; color: #666;">
-                <a onclick="alert('那就在你的手机号后面加@bigblue.com作为你的登录邮箱')" style="color: #4a90e2; cursor: pointer; text-decoration: underline;">如果我之前用手机注册的怎么办？</a>
+                <a onclick="alert('服务器已更换，旧帐号全部不可用，请重新注册！')" style="color: #4a90e2; cursor: pointer; text-decoration: underline;">如果我之前用手机注册的怎么办？</a>
             </div>
             <div class="switch">还没有账号？<a onclick="showRegister()">立即注册</a></div>
         </div>
@@ -1581,37 +1585,14 @@
     </div>
 
     <script>
-        const SUPABASE_URL = 'https://vmdwztwwdfmqheqfcdbn.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZtZHd6dHd3ZGZtcWhlcWZjZGJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDM5MDksImV4cCI6MjA5Nzg3OTkwOX0.e3xYd3dLgUdthr6kAHvUKqQOeNiLClk1-sIPmraNkf8';
-        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-            auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
-        });
-        
-        // 页面加载时测试 Supabase 连接
-        async function testSupabaseConnection() {
-            try {
-                console.log('[测试] 开始测试 Supabase 连接...');
-                const { data, error } = await supabaseClient.from('profiles').select('id').limit(1);
-                if (error) {
-                    console.error('[测试] Supabase 查询失败:', error);
-                } else {
-                    console.log('[测试] Supabase 连接成功:', data);
-                }
-            } catch (e) {
-                console.error('[测试] Supabase 连接异常:', e);
-            }
-        }
-        testSupabaseConnection();
-
-        // 初始化 EmailJS
-        emailjs.init('DO-rY5_HM3hSl5u6V');
-
+        // 全局变量声明（必须在任何函数调用之前）
         let currentUser = null;
         let selectedImages = [];
         let currentHomeTab = 'latest';
         let currentDetailPostId = null;
         let viewingUserId = null;
         let pageHistory = []; // 页面历史栈，用于返回
+        let splashHidden = false; // 启动页状态
         const HOME_PAGE_SIZE = 20; // 每次加载的帖子数
         let homePostsLoading = false; // 防止重复加载
         let homeLoadToken = 0; // 请求令牌，防止旧响应覆盖新请求
@@ -1623,10 +1604,17 @@
         let homeDomCache = null; // 首页 DOM 缓存
         let homeCacheTime = 0; // 首页缓存时间
 
+        // 使用 CloudBase API（已迁移）
+        // 初始化用户状态
+        currentUser = window.api.auth.getCurrentUser();
+
+        // 初始化 EmailJS
+        emailjs.init('DO-rY5_HM3hSl5u6V');
+
         async function getHiddenPostIds() {
-            const { data, error } = await supabaseClient.from('hidden_posts').select('post_id');
-            if (error || !data) return [];
-            return data.map(h => h.post_id);
+            const result = await window.api.database.getHiddenPostIds();
+            if (!result.success || !result.data) return [];
+            return result.data;
         }
 
         function showMessage(text, type) {
@@ -1642,15 +1630,8 @@
             const currentVisible = document.querySelector('.page:not(.hidden)');
             const currentId = currentVisible ? currentVisible.id : null;
 
-            // 离开首页时缓存 DOM 和滚动位置
-            if (currentId === 'page-home' && pageId !== 'page-home' && !pendingHomeRestore) {
-                const homeContent = document.getElementById('home-content');
-                if (homeContent && homeContent.innerHTML.trim() !== '') {
-                    homeDomCache = homeContent.innerHTML;
-                    homeCacheTime = Date.now();
-                    homeScrollPos = window.scrollY || window.pageYOffset;
-                }
-            }
+        // 离开首页时不缓存 DOM，每次都重新加载最新帖子
+        // 缓存逻辑已禁用，确保用户始终看到最新内容
 
             if (!skipHistory && currentVisible && currentVisible.id !== pageId) {
                 // 详情页入栈前记录来源
@@ -1667,21 +1648,19 @@
                 document.getElementById(id).classList.add('hidden');
             });
 
-            // 返回首页且有缓存时，直接恢复 DOM
-            if (pageId === 'page-home' && homeDomCache && (Date.now() - homeCacheTime < 30000) && currentId !== 'page-home') {
-                const homeContent = document.getElementById('home-content');
-                homeContent.innerHTML = homeDomCache;
+            // 返回首页时总是重新加载，不使用缓存
+            if (pageId === 'page-home') {
                 document.getElementById('page-home').classList.remove('hidden');
-                pendingHomeRestore = true;
-                requestAnimationFrame(() => {
-                    window.scrollTo(0, homeScrollPos);
-                    pendingHomeRestore = false;
-                });
+                // 清空内容，准备重新加载
+                const homeContent = document.getElementById('home-content');
+                homeContent.innerHTML = '';
+                // 重置分页状态
+                homeOffset = 0;
+                homePostsLoading = false;
+                // 加载最新帖子
+                loadPosts();
             } else {
                 document.getElementById(pageId).classList.remove('hidden');
-                if (pageId === 'page-home' && currentId !== 'page-home') {
-                    homeDomCache = null;
-                }
             }
 
             document.getElementById('nav-home').classList.remove('active');
@@ -1746,10 +1725,10 @@
 
         function navigateHome() {
             currentHomeTab = 'latest';
-            homeDomCache = null;
-            homeCacheTime = 0;
+            homeOffset = 0;
+            homePostsLoading = false;
             showPage('page-home');
-            loadPosts();
+            // showPage 已经会调用 loadPosts()，这里不需要重复调用
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
@@ -1780,27 +1759,16 @@
             content.innerHTML = spinner();
 
             // 搜索页热榜：全站历史最热帖子 TOP30
-            const { data: rpcPosts, error: rpcError } = await supabaseClient.rpc('get_all_time_hot_posts', { p_limit: 30 });
+            const result = await window.api.database.getAllTimeHotPosts(30);
             let posts;
-            if (!rpcError && rpcPosts) {
-                posts = rpcPosts.map(p => ({
+            if (result.success && result.data) {
+                posts = result.data.map(p => ({
                     ...p,
                     is_pinned: isHotPinned(p.username, p.content),
                     profiles: { id: p.user_id, username: p.username, avatar_url: p.avatar_url }
                 }));
             } else {
-                const hiddenIds = await getHiddenPostIds();
-                let query = supabaseClient.from('posts')
-                    .select('*, profiles:user_id(id, username, avatar_url)')
-                    .limit(100);
-                if (hiddenIds.length > 0) query = query.not('id', 'in', `(${hiddenIds.join(',')})`);
-                const { data, error } = await query;
-                if (error) { content.innerHTML = `<div class="empty">加载失败：${error.message}</div>`; return; }
-                posts = (data || []).map(p => ({
-                    ...p,
-                    hot_score: (p.views || 0) * 1 + (p.likes_count || 0) * 10 + (p.comments_count || 0) * 20,
-                    is_pinned: isHotPinned(p.profiles?.username, p.content)
-                })).sort((a, b) => (b.is_pinned - a.is_pinned) || (b.hot_score - a.hot_score)).slice(0, 30);
+                content.innerHTML = `<div class="empty">加载失败：${result.message}</div>`; return;
             }
 
             if (!posts || posts.length === 0) { content.innerHTML = `<div class="empty">暂无热榜内容</div>`; return; }
@@ -1857,21 +1825,14 @@
             const content = document.getElementById('search-content');
             content.innerHTML = spinner();
 
-            const hiddenIds = await getHiddenPostIds();
-            let postsQuery = supabaseClient.from('posts')
-                .select('*, profiles:user_id(id, username, avatar_url)')
-                .or(`title.ilike.%${keyword}%,content.ilike.%${keyword}%`)
-                .order('created_at', { ascending: false });
-            if (hiddenIds.length > 0) postsQuery = postsQuery.not('id', 'in', `(${hiddenIds.join(',')})`);
-            const usersQuery = supabaseClient.from('profiles')
-                .select('id, username, avatar_url, bio, followers_count')
-                .or(`username.ilike.%${keyword}%,bio.ilike.%${keyword}%`)
-                .limit(20);
-            const [postsResult, usersResult] = await Promise.all([postsQuery, usersQuery]);
+            const [postsResult, usersResult] = await Promise.all([
+                window.api.database.searchPosts(keyword, { limit: 100 }),
+                window.api.database.searchUsers(keyword, { limit: 20 })
+            ]);
 
             let html = '';
 
-            if (usersResult.data && usersResult.data.length > 0) {
+            if (usersResult.success && usersResult.data && usersResult.data.length > 0) {
                 html += `<div class="search-section-title">👤 相关用户（${usersResult.data.length}）</div>`;
                 html += '<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;">';
                 for (const u of usersResult.data) {
@@ -1892,8 +1853,8 @@
                 html += '</div>';
             }
 
-            if (postsResult.error) {
-                html += `<div class="empty">帖子搜索失败：${postsResult.error.message}</div>`;
+            if (!postsResult.success) {
+                html += `<div class="empty">帖子搜索失败：${postsResult.message}</div>`;
             } else if (!postsResult.data || postsResult.data.length === 0) {
                 html += `<div class="search-section-title">📝 相关帖子（0）</div><div class="empty">没有找到相关帖子</div>`;
             } else {
@@ -2033,6 +1994,19 @@
             }
         }
 
+        // 文件转Base64
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(',')[1];
+                    resolve(base64);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
         // 图片压缩：压缩到指定最大宽度和大小（严格保证不超过 maxSizeKB）
         function compressImageToFile(file, maxWidth, maxSizeKB) {
             return new Promise((resolve, reject) => {
@@ -2120,9 +2094,8 @@
 
         // 用户总数
         async function loadUserCount() {
-            const { count, error } = await supabaseClient.from('profiles')
-                .select('*', { count: 'exact', head: true });
-            const text = error ? '当前已注册用户：未知' : `当前已注册用户：${count || 0}人`;
+            const result = await window.api.database.getUserCount();
+            const text = !result.success ? '当前已注册用户：未知' : `当前已注册用户：${result.data || 0}人`;
             const el1 = document.getElementById('user-count');
             const el2 = document.getElementById('search-user-count');
             if (el1) el1.textContent = text;
@@ -2130,12 +2103,19 @@
         }
 
         async function handleLogin() {
-            const email = document.getElementById('login-email').value.trim();
+            const input = document.getElementById('login-email').value.trim();
             const password = document.getElementById('login-password').value.trim();
-            if (!email || !password) { showMessage('请填写邮箱和密码', 'error'); return; }
-            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-            if (error) { showMessage('登录失败：' + error.message, 'error'); return; }
-            currentUser = data.user;
+            if (!input || !password) { showMessage('请填写邮箱/手机号和密码', 'error'); return; }
+            
+            // 判断是邮箱还是手机号
+            const isEmail = input.includes('@');
+            const loginData = isEmail 
+                ? { email: input, password }
+                : { phone: input, password };
+            
+            const result = await window.api.auth.loginWithPhoneOrEmail(loginData);
+            if (!result.success) { showMessage('登录失败：' + (result.message || '未知错误'), 'error'); return; }
+            currentUser = window.api.auth.getCurrentUser();
             await loadUserProfile();
             await trackUserIp();
             showMessage('登录成功！', 'success');
@@ -2177,7 +2157,7 @@
                     // 邮件发送失败（额度用完或其他错误），直接显示验证码
                     console.warn('邮件发送失败:', emailError);
                     sessionStorage.setItem('email_code_' + email, code);
-                    showMessage('验证码：' + code, 'success');
+                    alert('验证码：' + code);
                 }
                 
                 let countdown = 60;
@@ -2225,13 +2205,9 @@
             // 检查昵称是否重复
             let existingUser, checkError;
             try {
-                const result = await supabaseClient
-                    .from('profiles')
-                    .select('id')
-                    .eq('username', nickname)
-                    .maybeSingle();
-                existingUser = result.data;
-                checkError = result.error;
+                const checkResult = await window.api.database.checkUsername(nickname);
+                existingUser = checkResult.success && checkResult.data?.exists;
+                checkError = !checkResult.success ? checkResult.message : null;
             } catch (e) {
                 console.error('[注册] 检查昵称异常:', e);
                 showMessage('网络错误，请稍后重试', 'error');
@@ -2246,72 +2222,52 @@
                 showMessage('该昵称已被使用，请换一个', 'error');
                 return;
             }
-            
-            // 注册账号（使用原生 fetch 绕过 SDK）
+            // 注册账号
             console.log('[注册] 开始注册');
-            
+
             try {
-                const response = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': SUPABASE_ANON_KEY
-                    },
-                    body: JSON.stringify({
-                        email: email,
-                        password: password,
-                        data: { nickname: nickname }
-                    })
-                });
-                
-                const result = await response.json();
-                console.log('[注册] fetch 结果:', result, 'status:', response.status);
-                
-                if (!response.ok) {
-                    let errMsg = '注册失败';
-                    if (result.message?.includes('already registered') || result.message?.includes('already exists')) {
+                const deviceId = getDeviceId();
+                const registerResult = await window.api.auth.register(email, password, nickname, deviceId);
+                console.log('[注册] 结果:', registerResult);
+
+                if (!registerResult.success) {
+                    let errMsg = registerResult.message || '注册失败';
+                    if (errMsg.includes('already registered') || errMsg.includes('already exists')) {
                         errMsg = '该邮箱已被注册，请直接登录';
-                    } else if (result.message) {
-                        errMsg = result.message;
-                    } else if (result.error_description) {
-                        errMsg = result.error_description;
                     }
                     showMessage(errMsg, 'error');
                     return;
                 }
-                
-                if (!result.user) {
-                    showMessage('注册成功，请检查邮箱确认', 'success');
-                    return;
-                }
-                
-                currentUser = result.user;
-                console.log('[注册] 用户创建成功, userId:', currentUser.id);
-                
+
+                currentUser = window.api.auth.getCurrentUser();
+                console.log('[注册] 用户创建成功, userId:', currentUser?.id);
+
             } catch (e) {
-                console.error('[注册] fetch 异常:', e);
+                console.error('[注册] 异常:', e);
                 showMessage('网络连接失败，请检查网络后重试', 'error');
                 return;
             }
-            
-            // 创建 profile
-            console.log('[注册] 开始创建 profile');
-            try {
-                await createProfile(nickname, email);
-                console.log('[注册] profile 创建完成');
-            } catch (e) {
-                console.error('[注册] createProfile 异常:', e);
-                showMessage('账号已创建，但资料设置失败，请重新登录', 'error');
-                return;
+
+            // 创建 profile（如果注册接口没有自动创建）
+            if (!currentUser?.username) {
+                console.log('[注册] 开始创建 profile');
+                try {
+                    await createProfile(nickname, email);
+                    console.log('[注册] profile 创建完成');
+                } catch (e) {
+                    console.error('[注册] createProfile 异常:', e);
+                    showMessage('账号已创建，但资料设置失败，请重新登录', 'error');
+                    return;
+                }
             }
-            
+
             // 记录 IP
             try {
                 await trackUserIp();
             } catch (e) {
                 console.error('[注册] trackUserIp 失败:', e);
             }
-            
+
             showMessage('注册成功！', 'success');
             loadUserCount();
             startMessagePolling();
@@ -2320,12 +2276,11 @@
         }
 
         async function createProfile(nickname, email) {
-            // 重试逻辑：等待会话建立后创建/更新 profile
+            // 使用 CloudBase 注册后自动创建 profile
+            // 重试逻辑：等待用户状态建立
             for (let attempt = 0; attempt < 5; attempt++) {
-                // 检查是否有有效会话
-                const { data: { session } } = await supabaseClient.auth.getSession();
-                if (session && session.user) {
-                    currentUser = session.user;
+                currentUser = window.api.auth.getCurrentUser();
+                if (currentUser) {
                     break;
                 }
                 if (attempt < 4) {
@@ -2338,33 +2293,27 @@
                 throw new Error('无法获取用户会话');
             }
 
-            // 使用 RPC 函数创建 profile（绕过 RLS）
-            console.log('[createProfile] 使用 RPC 创建 profile, userId:', currentUser.id, 'nickname:', nickname);
-            const { error: rpcError } = await supabaseClient.rpc('create_user_profile', {
-                p_user_id: currentUser.id,
-                p_username: nickname,
-                p_email: email
-            });
+            // 通过云函数创建 profile
+            console.log('[createProfile] 创建 profile, userId:', currentUser.id, 'nickname:', nickname);
+            const result = await window.api.database.updateProfile({ username: nickname, email });
 
-            if (rpcError) {
-                console.error('[createProfile] RPC 失败:', rpcError);
-                throw rpcError;
+            if (!result.success) {
+                console.error('[createProfile] 失败:', result.message);
+                throw new Error(result.message || '创建 profile 失败');
             }
 
-            console.log('[createProfile] RPC 成功');
+            console.log('[createProfile] 成功');
             await loadUserProfile();
         }
 
         async function loadUserProfile() {
             if (!currentUser) return;
-            const { data } = await supabaseClient.from('profiles')
-                .select('username, bio, avatar_url, email')
-                .eq('id', currentUser.id).single();
-            if (data) {
-                currentUser.username = data.username;
-                currentUser.bio = data.bio;
-                currentUser.avatar_url = data.avatar_url;
-                currentUser.profile_email = data.email;
+            const result = await window.api.database.getProfile(currentUser.id);
+            if (result.success && result.data) {
+                currentUser.username = result.data.username;
+                currentUser.bio = result.data.bio;
+                currentUser.avatar_url = result.data.avatar_url;
+                currentUser.profile_email = result.data.email;
             }
         }
 
@@ -2447,20 +2396,20 @@
             const ip = await getUserIp();
             const device = getDeviceId();
             console.log('[IP记录] 开始记录, userId:', currentUser.id, 'IP:', ip, 'Device:', device);
-            
+
             try {
                 if (ip) {
-                    const { error: ipError } = await supabaseClient.rpc('update_user_ip', { p_user_id: currentUser.id, p_user_ip: ip });
-                    if (ipError) {
-                        console.error('[IP记录] IP上传失败:', ipError);
+                    const ipResult = await window.api.database.updateUserIp(currentUser.id, ip);
+                    if (!ipResult.success) {
+                        console.error('[IP记录] IP上传失败:', ipResult.message);
                     } else {
                         console.log('[IP记录] IP上传成功:', ip);
                     }
                 }
                 if (device) {
-                    const { error: deviceError } = await supabaseClient.rpc('update_user_device', { p_user_id: currentUser.id, p_device_id: device });
-                    if (deviceError) {
-                        console.error('[IP记录] 设备上传失败:', deviceError);
+                    const deviceResult = await window.api.database.updateUserDevice(currentUser.id, device);
+                    if (!deviceResult.success) {
+                        console.error('[IP记录] 设备上传失败:', deviceResult.message);
                     } else {
                         console.log('[IP记录] 设备上传成功:', device);
                     }
@@ -2476,13 +2425,12 @@
             const deviceId = getDeviceId();
             try {
                 if (ip) {
-                    const { data, error } = await supabaseClient.rpc('check_ip_banned', { check_ip: ip });
-                    if (error) throw error;
-                    if (!!data) return true;
+                    const result = await window.api.database.checkIpBanned(ip);
+                    if (result.success && result.data?.banned) return true;
                 }
-                const { data: data2, error: error2 } = await supabaseClient.rpc('check_device_banned', { check_device: deviceId });
-                if (error2) throw error2;
-                return !!data2;
+                const result2 = await window.api.database.checkDeviceBanned(deviceId);
+                if (result2.success && result2.data?.banned) return true;
+                return false;
             } catch (e) {
                 console.error('封禁检查失败', e);
                 return false;
@@ -2503,16 +2451,12 @@
             if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
             if (!confirm('确定要删除该用户的所有帖子吗？此操作不可恢复。')) return;
             try {
-                const { data, error } = await supabaseClient.rpc('delete_user_posts', {
-                    target_user_id: targetUserId,
-                    admin_user_id: currentUser.id
-                });
-                if (error) throw error;
-                if (data?.success) {
-                    showMessage(`已删除 ${data.deleted_count} 条帖子`, 'success');
+                const result = await window.api.database.adminDeleteUserPosts(targetUserId);
+                if (result.success && result.data?.success) {
+                    showMessage(`已删除 ${result.data.deleted_count} 条帖子`, 'success');
                     loadUserHomePage(targetUserId);
                 } else {
-                    showMessage(data?.error || '删除失败', 'error');
+                    showMessage(result.data?.error || result.message || '删除失败', 'error');
                 }
             } catch (e) {
                 showMessage('删除失败：' + e.message, 'error');
@@ -2523,16 +2467,12 @@
             if (event) event.stopPropagation();
             if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
             try {
-                const { data, error } = await supabaseClient.rpc('hide_post_from_recommend', {
-                    p_post_id: postId,
-                    admin_user_id: currentUser.id
-                });
-                if (error) throw error;
-                if (data?.success) {
+                const result = await window.api.database.adminHidePost(postId);
+                if (result.success && result.data?.success) {
                     showMessage('已隐藏该帖子，不再出现在推荐页', 'success');
                     loadPostDetail(postId);
                 } else {
-                    showMessage(data?.error || '操作失败', 'error');
+                    showMessage(result.data?.error || result.message || '操作失败', 'error');
                 }
             } catch (e) { showMessage('操作失败：' + e.message, 'error'); }
         }
@@ -2541,16 +2481,12 @@
             if (event) event.stopPropagation();
             if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
             try {
-                const { data, error } = await supabaseClient.rpc('unhide_post_from_recommend', {
-                    p_post_id: postId,
-                    admin_user_id: currentUser.id
-                });
-                if (error) throw error;
-                if (data?.success) {
+                const result = await window.api.database.adminUnhidePost(postId);
+                if (result.success && result.data?.success) {
                     showMessage('已恢复该帖子推荐', 'success');
                     loadPostDetail(postId);
                 } else {
-                    showMessage(data?.error || '操作失败', 'error');
+                    showMessage(result.data?.error || result.message || '操作失败', 'error');
                 }
             } catch (e) { showMessage('操作失败：' + e.message, 'error'); }
         }
@@ -2559,16 +2495,12 @@
             if (event) event.stopPropagation();
             if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
             try {
-                const { data, error } = await supabaseClient.rpc('feature_post', {
-                    p_post_id: postId,
-                    admin_user_id: currentUser.id
-                });
-                if (error) throw error;
-                if (data?.success) {
+                const result = await window.api.database.adminFeaturePost(postId);
+                if (result.success && result.data?.success) {
                     showMessage('已加精选', 'success');
                     loadPostDetail(postId);
                 } else {
-                    showMessage(data?.error || '操作失败', 'error');
+                    showMessage(result.data?.error || result.message || '操作失败', 'error');
                 }
             } catch (e) { showMessage('操作失败：' + e.message, 'error'); }
         }
@@ -2577,16 +2509,12 @@
             if (event) event.stopPropagation();
             if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
             try {
-                const { data, error } = await supabaseClient.rpc('unfeature_post', {
-                    p_post_id: postId,
-                    admin_user_id: currentUser.id
-                });
-                if (error) throw error;
-                if (data?.success) {
+                const result = await window.api.database.adminUnfeaturePost(postId);
+                if (result.success && result.data?.success) {
                     showMessage('已取消精选', 'success');
                     loadPostDetail(postId);
                 } else {
-                    showMessage(data?.error || '操作失败', 'error');
+                    showMessage(result.data?.error || result.message || '操作失败', 'error');
                 }
             } catch (e) { showMessage('操作失败：' + e.message, 'error'); }
         }
@@ -2595,19 +2523,14 @@
             if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
             const reason = prompt('请输入拉黑原因（可选）：') || '';
             try {
-                const { data, error } = await supabaseClient.rpc('ban_user_ip', {
-                    target_user_id: targetUserId,
-                    admin_user_id: currentUser.id,
-                    reason: reason
-                });
-                if (error) throw error;
-                if (data?.success) {
+                const result = await window.api.database.adminBanUserIp(targetUserId, reason);
+                if (result.success && result.data?.success) {
                     const parts = [];
-                    if (data.ip) parts.push('IP: ' + data.ip);
-                    if (data.device) parts.push('设备: ' + data.device.substring(0, 16) + '...');
+                    if (result.data.ip) parts.push('IP: ' + result.data.ip);
+                    if (result.data.device) parts.push('设备: ' + result.data.device.substring(0, 16) + '...');
                     showMessage(`已拉黑 ${parts.join('，')}`, 'success');
                 } else {
-                    showMessage(data?.error || '拉黑失败', 'error');
+                    showMessage(result.data?.error || result.message || '拉黑失败', 'error');
                 }
             } catch (e) {
                 showMessage('拉黑失败：' + e.message, 'error');
@@ -2618,15 +2541,11 @@
             if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
             if (!confirm('确定要删除该用户的所有评论吗？此操作不可恢复。')) return;
             try {
-                const { data, error } = await supabaseClient.rpc('delete_user_comments', {
-                    target_user_id: targetUserId,
-                    admin_user_id: currentUser.id
-                });
-                if (error) throw error;
-                if (data?.success) {
-                    showMessage(`已删除 ${data.deleted_count} 条评论`, 'success');
+                const result = await window.api.database.adminDeleteUserComments(targetUserId);
+                if (result.success && result.data?.success) {
+                    showMessage(`已删除 ${result.data.deleted_count} 条评论`, 'success');
                 } else {
-                    showMessage(data?.error || '删除失败', 'error');
+                    showMessage(result.data?.error || result.message || '删除失败', 'error');
                 }
             } catch (e) {
                 showMessage('删除失败：' + e.message, 'error');
@@ -2639,16 +2558,12 @@
             const confirmText = prompt('请输入"确认删除"以继续：');
             if (confirmText !== '确认删除') { showMessage('已取消', 'info'); return; }
             try {
-                const { data, error } = await supabaseClient.rpc('delete_user_account', {
-                    target_user_id: targetUserId,
-                    admin_user_id: currentUser.id
-                });
-                if (error) throw error;
-                if (data?.success) {
+                const result = await window.api.database.adminDeleteUserAccount(targetUserId);
+                if (result.success && result.data?.success) {
                     showMessage('账号已删除', 'success');
                     navigateHome();
                 } else {
-                    showMessage(data?.error || '删除失败', 'error');
+                    showMessage(result.data?.error || result.message || '删除失败', 'error');
                 }
             } catch (e) {
                 showMessage('删除失败：' + e.message, 'error');
@@ -2656,8 +2571,7 @@
         }
 
         async function handleLogout() {
-            const { error } = await supabaseClient.auth.signOut();
-            if (error) { showMessage('退出失败：' + error.message, 'error'); return; }
+            window.api.auth.logout();
             currentUser = null;
             if (messagePollTimer) { clearInterval(messagePollTimer); messagePollTimer = null; }
             const badge = document.getElementById('msg-badge');
@@ -2812,13 +2726,11 @@
             const container = document.getElementById('about-content');
             container.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">加载中...</div>';
             try {
-                const { data, error } = await supabaseClient
-                    .from('site_content')
-                    .select('key, content, updated_at')
-                    .in('key', ['author_intro', 'changelog']);
-                if (error) throw error;
+                const result = await window.api.database.getSiteContent(['author_intro', 'changelog']);
                 const map = {};
-                (data || []).forEach(row => { map[row.key] = row; });
+                if (result.success && result.data) {
+                    (result.data || []).forEach(row => { map[row.key] = row; });
+                }
 
                 const author = map.author_intro;
                 const changelog = map.changelog;
@@ -2864,12 +2776,10 @@
             const area = document.getElementById('guestbook-area');
             if (!area) return;
             try {
-                const { data, error } = await supabaseClient.from('guestbook')
-                    .select('id, user_id, content, created_at, updated_at, profiles:user_id(id, username, avatar_url)')
-                    .order('created_at', { ascending: false });
-                if (error) throw error;
+                const result = await window.api.database.getGuestbook();
+                if (!result.success) throw new Error(result.message);
 
-                const entries = data || [];
+                const entries = result.data || [];
                 myGuestbookEntry = currentUser ? entries.find(e => e.user_id === currentUser.id) : null;
 
                 let html = '';
@@ -2941,9 +2851,8 @@
             if (btn) { btn.disabled = true; btn.textContent = '发布中...'; }
 
             try {
-                const { error } = await supabaseClient.from('guestbook')
-                    .insert({ user_id: currentUser.id, content });
-                if (error) throw error;
+                const result = await window.api.database.createGuestbook(content);
+                if (!result.success) throw new Error(result.message);
                 loadGuestbook();
             } catch (err) {
                 console.error('发布留言失败', err);
@@ -2974,10 +2883,8 @@
             if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
 
             try {
-                const { error } = await supabaseClient.from('guestbook')
-                    .update({ content })
-                    .eq('id', myGuestbookEntry.id);
-                if (error) throw error;
+                const result = await window.api.database.updateGuestbook(myGuestbookEntry.id, content);
+                if (!result.success) throw new Error(result.message);
                 loadGuestbook();
             } catch (err) {
                 console.error('修改留言失败', err);
@@ -3010,24 +2917,18 @@
             }
 
             const offset = categoryListPage * CATEGORY_PAGE_SIZE;
-            const hiddenIds = await getHiddenPostIds();
-            let query = supabaseClient.from('posts')
-                .select('*, profiles:user_id(id, username, avatar_url)')
-                .eq('category', currentCategory)
-                .order('created_at', { ascending: false })
-                .range(offset, offset + CATEGORY_PAGE_SIZE - 1);
-            if (hiddenIds.length > 0) query = query.not('id', 'in', `(${hiddenIds.join(',')})`);
-            const { data: posts, error } = await query;
+            const result = await window.api.database.getCategoryPosts(currentCategory, { offset, limit: CATEGORY_PAGE_SIZE });
 
             const tip = document.getElementById('cat-load-tip');
             if (tip) tip.remove();
 
-            if (error) {
-                if (categoryListPage === 0) content.innerHTML = `<div class="empty">加载失败：${error.message}</div>`;
+            if (!result.success) {
+                if (categoryListPage === 0) content.innerHTML = `<div class="empty">加载失败：${result.message}</div>`;
                 categoryListLoading = false;
                 return;
             }
-            if (!posts || posts.length === 0) {
+            const posts = result.data || [];
+            if (posts.length === 0) {
                 if (categoryListPage === 0) content.innerHTML = '<div class="empty">该分区暂无帖子</div>';
                 categoryListEnded = true;
                 categoryListLoading = false;
@@ -3081,13 +2982,11 @@
                 return;
             }
             try {
-                const { count, error } = await supabaseClient.from('notifications')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('user_id', currentUser.id)
-                    .eq('read', false);
+                const result = await window.api.database.getUnreadCount();
                 const badge = document.getElementById('msg-badge');
                 if (!badge) return;
-                if (!error && count > 0) {
+                if (result.success && result.data?.count > 0) {
+                    const count = result.data.count;
                     badge.textContent = count > 99 ? '99+' : count;
                     badge.classList.add('show');
                 } else {
@@ -3107,26 +3006,19 @@
             const content = document.getElementById('messages-content');
             content.innerHTML = spinner();
 
-            // 带超时的查询包装
-            const withTimeout = (promise, ms) => Promise.race([
-                promise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('请求超时')), ms))
-            ]);
-
             let notifs;
             try {
-                const result = await withTimeout(
-                    supabaseClient.from('notifications')
-                        .select('id, user_id, actor_id, type, post_id, comment_id, read, created_at')
-                        .eq('user_id', currentUser.id)
-                        .order('created_at', { ascending: false })
-                        .limit(50),
-                    10000
-                );
-                if (result.error) { content.innerHTML = `<div class="empty">加载失败：${result.error.message}</div>`; return; }
+                const result = await window.api.database.getNotifications({ limit: 50 });
+                // 兼容 success 和 code 两种格式
+                const isSuccess = result && (result.success === true || result.code === 200);
+                if (!isSuccess) {
+                    const errorMsg = result?.message || result?.error || '未知错误';
+                    content.innerHTML = `<div class="empty">加载失败：${errorMsg}</div>`;
+                    return;
+                }
                 notifs = result.data;
             } catch (e) {
-                content.innerHTML = `<div class="empty">加载失败：${e.message}（请确认已执行数据库迁移SQL）</div>`;
+                content.innerHTML = `<div class="empty">加载失败：${e.message}</div>`;
                 return;
             }
 
@@ -3138,18 +3030,16 @@
             let actorMap = {}, postMap = {};
             try {
                 if (actorIds.length > 0) {
-                    const r1 = await withTimeout(
-                        supabaseClient.from('profiles').select('id, username, avatar_url').in('id', actorIds),
-                        10000
-                    );
-                    (r1.data || []).forEach(a => { actorMap[a.id] = a; });
+                    const r1 = await window.api.callFunction('users/batch-get', { ids: actorIds });
+                    if (r1.success && r1.data) {
+                        (r1.data || []).forEach(a => { actorMap[a.id] = a; });
+                    }
                 }
                 if (postIds.length > 0) {
-                    const r2 = await withTimeout(
-                        supabaseClient.from('posts').select('id, title').in('id', postIds),
-                        10000
-                    );
-                    (r2.data || []).forEach(p => { postMap[p.id] = p; });
+                    const r2 = await window.api.callFunction('posts/batch-get', { ids: postIds });
+                    if (r2.success && r2.data) {
+                        (r2.data || []).forEach(p => { postMap[p.id] = p; });
+                    }
                 }
             } catch (e) {
                 // 查询失败不阻塞，用默认值渲染
@@ -3187,17 +3077,14 @@
 
         async function markAllRead() {
             try {
-                await supabaseClient.from('notifications')
-                    .update({ read: true })
-                    .eq('user_id', currentUser.id)
-                    .eq('read', false);
+                await window.api.database.markAllNotificationsRead();
                 loadUnreadCount();
             } catch (e) {}
         }
 
         function openNotification(postId, notifId, wasRead, commentId) {
             if (!wasRead) {
-                supabaseClient.from('notifications').update({ read: true }).eq('id', notifId).then(() => loadUnreadCount()).catch(() => {});
+                window.api.database.markNotificationRead(notifId).then(() => loadUnreadCount()).catch(() => {});
             }
             if (postId) navigateDetail(postId, null, commentId);
         }
@@ -3228,9 +3115,9 @@
             if (hotPostsCache && now - hotPostsCacheTime < 60000) {
                 return hotPostsCache;
             }
-            const { data, error } = await supabaseClient.rpc('get_hot_posts', { p_limit: 30 });
-            if (error) throw error;
-            hotPostsCache = data || [];
+            const result = await window.api.database.getHotPosts(30);
+            if (!result.success) throw new Error(result.message);
+            hotPostsCache = result.data || [];
             hotPostsCacheTime = now;
             return hotPostsCache;
         }
@@ -3346,25 +3233,21 @@
             }
 
             // 按发布时间倒序查询帖子（排除被隐藏的帖子）
-            const hiddenIds = await getHiddenPostIds();
-            let query = supabaseClient.from('posts')
-                .select('*, profiles:user_id(id, username, avatar_url)')
-                .order('created_at', { ascending: false })
-                .range(homeOffset, homeOffset + HOME_PAGE_SIZE - 1);
-            if (hiddenIds.length > 0) query = query.not('id', 'in', `(${hiddenIds.join(',')})`);
-            const { data: posts, error } = await query;
+            const result = await window.api.database.getPosts({ offset: homeOffset, limit: HOME_PAGE_SIZE });
 
             if (myToken !== homeLoadToken) { homePostsLoading = false; return; }
 
-            if (error) {
+            if (!result.success) {
                 if (homeOffset === 0) {
-                    homeContent.innerHTML = `<div class="empty">加载失败：${error.message}<br><button class="btn btn-outline" style="margin-top:12px;" onclick="loadPosts()">重试</button></div>`;
+                    homeContent.innerHTML = `<div class="empty">加载失败：${result.message}<br><button class="btn btn-outline" style="margin-top:12px;" onclick="loadPosts()">重试</button></div>`;
                 }
                 homePostsLoading = false;
                 return;
             }
 
-            if (!posts || posts.length === 0) {
+            const posts = result.data || [];
+
+            if (posts.length === 0) {
                 if (homeOffset === 0) {
                     homeContent.innerHTML = `<div class="empty">暂无帖子，快点击底部 + 发布第一个吧！</div>`;
                 } else {
@@ -3377,27 +3260,32 @@
 
             homeOffset += posts.length;
 
-            // 随机取1-2个热门帖子插入到当前批次中（使用缓存，减少重复请求）
-            let finalPosts = [...posts];
-            try {
-                const hotPosts = await pickHotPostsForBatch(posts);
-                if (hotPosts.length > 0) {
-                    hotPosts.forEach(hp => {
-                        const insertAt = Math.floor(Math.random() * (finalPosts.length + 1));
-                        finalPosts.splice(insertAt, 0, hp);
-                    });
-                }
-            } catch (e) {}
+            // 不再随机插入热门帖子，保持时间顺序
+            const finalPosts = [...posts];
 
-            // 渲染
+            // 渲染（添加去重）
             if (homeOffset === posts.length) {
-                // 首次加载
-                homeContent.innerHTML = '<div class="masonry">' + finalPosts.map(renderPostCard).join('') + '</div>';
+                // 首次加载 - 去重
+                const seenIds = new Set();
+                const uniquePosts = finalPosts.filter(p => {
+                    if (seenIds.has(p.id)) return false;
+                    seenIds.add(p.id);
+                    return true;
+                });
+                homeContent.innerHTML = '<div class="masonry">' + uniquePosts.map(renderPostCard).join('') + '</div>';
             } else {
-                // 追加到已有列表
+                // 追加到已有列表 - 去重（检查已有卡片）
                 const masonry = homeContent.querySelector('.masonry');
                 if (masonry) {
-                    masonry.insertAdjacentHTML('beforeend', finalPosts.map(renderPostCard).join(''));
+                    const existingIds = new Set();
+                    masonry.querySelectorAll('.post-card').forEach(el => {
+                        const m = (el.getAttribute('onclick') || '').match(/navigateDetail\('(.+?)'\)/);
+                        if (m) existingIds.add(m[1]);
+                    });
+                    const uniquePosts = finalPosts.filter(p => !existingIds.has(p.id));
+                    if (uniquePosts.length > 0) {
+                        masonry.insertAdjacentHTML('beforeend', uniquePosts.map(renderPostCard).join(''));
+                    }
                 }
             }
 
@@ -3456,28 +3344,26 @@
             homeContent.innerHTML = spinner();
 
             // 优先用数据库综合指数排序，失败则回退到前端排序
-            const { data: rpcPosts, error: rpcError } = await supabaseClient.rpc('get_hot_posts', { p_limit: 30 });
+            const result = await window.api.database.getHotPosts(30);
             let posts;
-            if (!rpcError && rpcPosts) {
-                posts = rpcPosts.map(p => ({
+            if (result.success && result.data) {
+                posts = result.data.map(p => ({
                     ...p,
                     is_pinned: isHotPinned(p.username, p.content),
                     profiles: { id: p.user_id, username: p.username, avatar_url: p.avatar_url }
                 }));
             } else {
-                const hiddenIds = await getHiddenPostIds();
-                const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-                let query = supabaseClient.from('posts')
-                    .select('*, profiles:user_id(id, username, avatar_url)')
-                    .gte('created_at', since)
-                    .limit(100);
-                if (hiddenIds.length > 0) query = query.not('id', 'in', `(${hiddenIds.join(',')})`);
-                const { data, error } = await query;
-                if (error) { homeContent.innerHTML = `<div class="empty">加载失败：${error.message}</div>`; return; }
-                posts = (data || []).map(p => ({
+                // 回退：使用全站最热
+                const fallbackResult = await window.api.database.getAllTimeHotPosts(100);
+                if (!fallbackResult.success) {
+                    homeContent.innerHTML = `<div class="empty">加载失败：${fallbackResult.message}</div>`;
+                    return;
+                }
+                posts = (fallbackResult.data || []).map(p => ({
                     ...p,
                     hot_score: (p.views || 0) * 1 + (p.likes_count || 0) * 10 + (p.comments_count || 0) * 20,
-                    is_pinned: isHotPinned(p.profiles?.username, p.content)
+                    is_pinned: isHotPinned(p.username, p.content),
+                    profiles: { id: p.user_id, username: p.username, avatar_url: p.avatar_url }
                 })).sort((a, b) => (b.is_pinned - a.is_pinned) || (b.hot_score - a.hot_score)).slice(0, 30);
             }
 
@@ -3531,10 +3417,11 @@
             const homeContent = document.getElementById('home-content');
             homeContent.innerHTML = spinner();
 
-            const { data: posts, error } = await supabaseClient.rpc('get_featured_posts', { p_limit: 50 });
-            if (error) { homeContent.innerHTML = `<div class="empty">加载失败：${error.message}</div>`; return; }
+            const result = await window.api.database.getFeaturedPosts(50);
+            if (!result.success) { homeContent.innerHTML = `<div class="empty">加载失败：${result.message}</div>`; return; }
 
-            if (!posts || posts.length === 0) { homeContent.innerHTML = `<div class="empty">暂无精选帖子</div>`; return; }
+            const posts = result.data || [];
+            if (posts.length === 0) { homeContent.innerHTML = `<div class="empty">暂无精选帖子</div>`; return; }
 
             const finalPosts = posts.map(p => ({
                 ...p,
@@ -3548,14 +3435,17 @@
             const detailContent = document.getElementById('detail-content');
             detailContent.innerHTML = spinner();
 
-            const { data: post, error } = await supabaseClient.from('posts')
-                .select('*, profiles:user_id(id, username, avatar_url)')
-                .eq('id', postId).single();
-
-            if (error) { detailContent.innerHTML = `<div class="empty">加载失败：${error.message}</div>`; return; }
+            try {
+                const postResult = await window.api.database.getPost(postId);
+                console.log('[loadPostDetail] postResult:', postResult);
+                if (!postResult || !postResult.success || !postResult.data) {
+                    detailContent.innerHTML = `<div class="empty">加载失败：${postResult?.message || '数据为空'}</div>`;
+                    return;
+                }
+                const post = postResult.data;
 
             // 增加浏览量（异步执行，不阻塞渲染）
-            supabaseClient.rpc('increment_views', { p_post_id: postId }).then(() => {
+            window.api.database.incrementViews(postId).then(() => {
                 post.views = (post.views || 0) + 1;
             }).catch(() => {});
 
@@ -3569,10 +3459,8 @@
             currentDetailPostObj = post;
             const hasPoll = post.poll_options && post.poll_options.length > 0;
 
-            const { data: comments } = await supabaseClient.from('comments')
-                .select('*, profiles:user_id(id, username, avatar_url)')
-                .eq('post_id', postId)
-                .order('created_at', { ascending: true });
+            const commentsResult = await window.api.database.getComments(postId);
+            const comments = commentsResult.success ? commentsResult.data : [];
 
             const commentsHTML = (comments && comments.length > 0) ? renderCommentsTree(comments) : '<div class="empty" style="padding:20px;">暂无评论，快来抢沙发！</div>';
 
@@ -3581,12 +3469,12 @@
             let isFeatured = false;
             if (isCurrentUserSuperAdmin()) {
                 try {
-                    const { data: hiddenData } = await supabaseClient.rpc('is_post_hidden', { p_post_id: postId });
-                    isHidden = !!hiddenData;
+                    const hiddenResult = await window.api.database.isPostHidden(postId);
+                    isHidden = hiddenResult.success && hiddenResult.data?.hidden;
                 } catch (e) {}
                 try {
-                    const { data: featuredData } = await supabaseClient.rpc('is_post_featured', { p_post_id: postId });
-                    isFeatured = !!featuredData;
+                    const featuredResult = await window.api.database.isPostFeatured(postId);
+                    isFeatured = featuredResult.success && featuredResult.data?.featured;
                 } catch (e) {}
             }
 
@@ -3644,6 +3532,10 @@
                 const cid = pendingScrollCommentId;
                 pendingScrollCommentId = null;
                 setTimeout(() => scrollToComment(cid), 250);
+            }
+            } catch (e) {
+                console.error('[loadPostDetail] Error:', e);
+                detailContent.innerHTML = `<div class="empty">加载失败：${e.message}</div>`;
             }
         }
 
@@ -3767,15 +3659,15 @@
             let myVote = null;
             try {
                 if (currentUser) {
-                    const { data: myRow } = await supabaseClient.from('poll_votes')
-                        .select('option_index').eq('post_id', postId).eq('user_id', currentUser.id).maybeSingle();
-                    myVote = myRow ? myRow.option_index : null;
+                    const myResult = await window.api.callFunction('polls/my-vote', { postId, userId: currentUser.id });
+                    myVote = myResult.success && myResult.data ? myResult.data.option_index : null;
                 }
-                const { data: allVotes } = await supabaseClient.from('poll_votes')
-                    .select('option_index').eq('post_id', postId);
-                (allVotes || []).forEach(v => {
-                    if (v.option_index === 0 || v.option_index === 1) voteCounts[v.option_index]++;
-                });
+                const allResult = await window.api.callFunction('polls/votes', { postId });
+                if (allResult.success && allResult.data) {
+                    (allResult.data || []).forEach(v => {
+                        if (v.option_index === 0 || v.option_index === 1) voteCounts[v.option_index]++;
+                    });
+                }
             } catch (e) {}
             container.innerHTML = renderPollHTML(postId, options, voteCounts, myVote);
         }
@@ -3812,10 +3704,10 @@
 
         async function votePoll(postId, optionIndex) {
             if (!currentUser) { showMessage('请先登录后再投票', 'error'); return; }
-            const { data, error } = await supabaseClient.rpc('vote_poll', { p_post_id: postId, p_option_index: optionIndex });
-            if (error) { showMessage('投票失败：' + error.message, 'error'); return; }
+            const result = await window.api.database.votePoll(postId, optionIndex);
+            if (!result.success) { showMessage('投票失败：' + result.message, 'error'); return; }
             const voteCounts = [0, 0];
-            (data || []).forEach(r => { voteCounts[r.option_index] = r.vote_count; });
+            (result.data || []).forEach(r => { voteCounts[r.option_index] = r.vote_count; });
             const container = document.getElementById('poll-container');
             if (container && currentDetailPostObj && currentDetailPostObj.poll_options) {
                 container.innerHTML = renderPollHTML(postId, currentDetailPostObj.poll_options, voteCounts, optionIndex);
@@ -3925,15 +3817,19 @@
                 const fullPath = `${basePath}.jpg`;
                 const thumbPath = `${basePath}_thumb.jpg`;
 
-                const { error: fullUploadError } = await supabaseClient.storage.from('posts').upload(fullPath, fullFile);
-                if (fullUploadError) { console.error('评论图片上传失败', fullUploadError); continue; }
-                const { data: fullUrlData } = supabaseClient.storage.from('posts').getPublicUrl(fullPath);
-                imageUrls.push(fullUrlData.publicUrl);
+                try {
+                    const fullUploadResult = await window.api.storage.uploadImage(fullFile, fullPath);
+                    if (!fullUploadResult.fileID) { console.error('评论图片上传失败'); continue; }
+                    const fullUrl = window.api.storage.getImageUrl(fullPath);
+                    imageUrls.push(fullUrl);
 
-                const { error: thumbUploadError } = await supabaseClient.storage.from('posts').upload(thumbPath, thumbFile);
-                if (thumbUploadError) { console.error('评论缩略图上传失败', thumbUploadError); continue; }
-                const { data: thumbUrlData } = supabaseClient.storage.from('posts').getPublicUrl(thumbPath);
-                thumbnailUrls.push(thumbUrlData.publicUrl);
+                    const thumbUploadResult = await window.api.storage.uploadImage(thumbFile, thumbPath);
+                    if (!thumbUploadResult.fileID) { console.error('评论缩略图上传失败'); continue; }
+                    const thumbUrl = window.api.storage.getImageUrl(thumbPath);
+                    thumbnailUrls.push(thumbUrl);
+                } catch (e) {
+                    console.error('上传异常', e);
+                }
             }
             return { image_urls: imageUrls, thumbnail_urls: thumbnailUrls };
         }
@@ -3958,9 +3854,16 @@
                 insertPayload.image_urls = imageUrls;
                 insertPayload.thumbnail_urls = thumbnailUrls.length > 0 ? thumbnailUrls : null;
             }
-            const { error } = await supabaseClient.from('comments').insert([insertPayload]);
+            const result = await window.api.database.createComment(insertPayload);
+            console.log('[createReply] result:', result);
 
-            if (error) { showMessage('回复失败：' + error.message, 'error'); return; }
+            // 检查成功：success=true 或 code=200
+            const isSuccess = result && (result.success === true || result.code === 200);
+            if (!isSuccess) {
+                const errorMsg = result?.message || result?.error || '未知错误';
+                showMessage('回复失败：' + errorMsg, 'error');
+                return;
+            }
             replyImagesMap[parentId] = [];
             showMessage('回复成功！', 'success');
             setTimeout(loadUnreadCount, 300);
@@ -3986,9 +3889,16 @@
                 insertPayload.image_urls = imageUrls;
                 insertPayload.thumbnail_urls = thumbnailUrls.length > 0 ? thumbnailUrls : null;
             }
-            const { error } = await supabaseClient.from('comments').insert([insertPayload]);
+            const result = await window.api.database.createComment(insertPayload);
+            console.log('[createComment] result:', result);
 
-            if (error) { showMessage('评论失败：' + error.message, 'error'); return; }
+            // 检查成功：success=true 或 code=200
+            const isSuccess = result && (result.success === true || result.code === 200);
+            if (!isSuccess) {
+                const errorMsg = result?.message || result?.error || '未知错误';
+                showMessage('评论失败：' + errorMsg, 'error');
+                return;
+            }
             commentImages = [];
             renderCommentImgPreview();
             showMessage('评论成功！', 'success');
@@ -4162,26 +4072,49 @@
                 const item = selectedImages[i];
                 const fullFile = item.full || item;
                 const thumbFile = item.thumbnail || fullFile;
-                const basePath = `${currentUser.id}/${Date.now()}_${i}`;
-                const fullPath = `${basePath}.jpg`;
-                const thumbPath = `${basePath}_thumb.jpg`;
 
-                const { error: fullUploadError } = await supabaseClient.storage.from('posts').upload(fullPath, fullFile);
-                if (fullUploadError) { showMessage('图片上传失败：' + fullUploadError.message, 'error'); btn.textContent = '发布'; btn.disabled = false; return; }
-                const { data: fullUrlData } = supabaseClient.storage.from('posts').getPublicUrl(fullPath);
-                imageUrls.push(fullUrlData.publicUrl);
+                try {
+                    // 转换为base64并上传
+                    const fullBase64 = await fileToBase64(fullFile);
+                    const thumbBase64 = await fileToBase64(thumbFile);
 
-                const { error: thumbUploadError } = await supabaseClient.storage.from('posts').upload(thumbPath, thumbFile);
-                if (thumbUploadError) { showMessage('缩略图上传失败：' + thumbUploadError.message, 'error'); btn.textContent = '发布'; btn.disabled = false; return; }
-                const { data: thumbUrlData } = supabaseClient.storage.from('posts').getPublicUrl(thumbPath);
-                thumbnailUrls.push(thumbUrlData.publicUrl);
+                    const fullUploadResult = await window.api.callFunction('upload/image', {
+                        file_base64: fullBase64,
+                        filename: `post_${Date.now()}_${i}.jpg`,
+                        folder: 'posts'
+                    });
+                    if (!fullUploadResult.success) { showMessage('图片上传失败', 'error'); btn.textContent = '发布'; btn.disabled = false; return; }
+                    imageUrls.push(fullUploadResult.data.url);
+
+                    const thumbUploadResult = await window.api.callFunction('upload/image', {
+                        file_base64: thumbBase64,
+                        filename: `post_${Date.now()}_${i}_thumb.jpg`,
+                        folder: 'posts'
+                    });
+                    if (!thumbUploadResult.success) { showMessage('缩略图上传失败', 'error'); btn.textContent = '发布'; btn.disabled = false; return; }
+                    thumbnailUrls.push(thumbUploadResult.data.url);
+                } catch (e) {
+                    showMessage('上传失败：' + e.message, 'error');
+                    btn.textContent = '发布'; btn.disabled = false;
+                    return;
+                }
             }
 
-            const { error } = await supabaseClient.from('posts').insert([
-                { user_id: currentUser.id, title, content, image_urls: imageUrls, thumbnail_urls: thumbnailUrls, category, content_type: contentType, poll_options: pollOptions }
-            ]);
+            const result = await window.api.database.createPost({
+                user_id: currentUser.id, title, content,
+                image_urls: imageUrls, thumbnail_urls: thumbnailUrls,
+                category, content_type: contentType, poll_options: pollOptions
+            });
+            console.log('[createPost] result:', result);
 
-            if (error) { showMessage('发布失败：' + error.message, 'error'); btn.textContent = '发布'; btn.disabled = false; return; }
+            // 检查成功：success=true 或 code=200
+            const isSuccess = result && (result.success === true || result.code === 200);
+            if (!isSuccess) {
+                const errorMsg = result?.message || result?.error || '未知错误';
+                showMessage('发布失败：' + errorMsg, 'error');
+                btn.textContent = '发布'; btn.disabled = false;
+                return;
+            }
 
             showMessage('发布成功！', 'success');
             document.getElementById('post-title').value = '';
@@ -4202,15 +4135,14 @@
         async function toggleLike(postId, event) {
             if (event) event.stopPropagation();
             if (!currentUser) { showMessage('请先登录', 'error'); showLogin(); return; }
-            const { data: existing, error: checkError } = await supabaseClient.from('likes')
-                .select('id').eq('post_id', postId).eq('user_id', currentUser.id).single();
-            if (checkError && checkError.code !== 'PGRST116') { showMessage('操作失败：' + checkError.message, 'error'); return; }
-            if (existing) { await supabaseClient.from('likes').delete().eq('id', existing.id); }
-            else {
-                await supabaseClient.from('likes').insert([{ post_id: postId, user_id: currentUser.id }]);
-                // 点赞后刷新未读消息数（可能给自己发了通知...实际不会，但安全起见）
-                setTimeout(loadUnreadCount, 300);
-            }
+            
+            try {
+                const result = await window.api.database.toggleLike(postId);
+                console.log('[toggleLike] result:', result);
+                if (!result || !result.success) { 
+                    showMessage('操作失败：' + (result?.message || '未知错误'), 'error'); 
+                    return; 
+                }
 
             const currentPage = document.querySelector('.page:not(.hidden)');
             if (currentPage.id === 'page-home') {
@@ -4221,6 +4153,10 @@
             if (currentPage.id === 'page-detail') loadPostDetail(postId);
             if (currentPage.id === 'page-profile') loadProfilePage();
             if (currentPage.id === 'page-user') loadUserHomePage(viewingUserId);
+            } catch (e) {
+                console.error('[toggleLike] Error:', e);
+                showMessage('操作失败：' + e.message, 'error');
+            }
         }
 
         // 我的用户中心
@@ -4228,12 +4164,17 @@
             const profileContent = document.getElementById('profile-content');
             if (!currentUser) { profileContent.innerHTML = '<div class="empty">请先登录</div>'; return; }
 
-            const { data: profile, error: profileError } = await supabaseClient.from('profiles')
-                .select('*').eq('id', currentUser.id).single();
-            if (profileError) { profileContent.innerHTML = `<div class="empty">加载失败：${profileError.message}</div>`; return; }
+            try {
+                const profileResult = await window.api.database.getProfile(currentUser.id);
+                console.log('[loadProfilePage] profileResult:', profileResult);
+                if (!profileResult || !profileResult.success || !profileResult.data) {
+                    profileContent.innerHTML = `<div class="empty">加载失败：${profileResult?.message || '数据为空'}</div>`;
+                    return;
+                }
+                const profile = profileResult.data;
 
-            const { data: posts } = await supabaseClient.from('posts')
-                .select('id, likes_count').eq('user_id', currentUser.id);
+            const postsResult = await window.api.database.getUserPosts(currentUser.id);
+            const posts = postsResult.success ? postsResult.data : [];
             const postCount = posts ? posts.length : 0;
             const totalLikes = posts ? posts.reduce((sum, p) => sum + (p.likes_count || 0), 0) : 0;
             const firstChar = (profile.username || '?').charAt(0);
@@ -4276,16 +4217,18 @@
             `;
 
             loadMyPostsList();
+            } catch (e) {
+                console.error('[loadProfilePage] Error:', e);
+                profileContent.innerHTML = `<div class="empty">加载失败：${e.message}</div>`;
+            }
         }
 
         async function loadMyPostsList() {
             const myPostsList = document.getElementById('my-posts-list');
-            const { data: myPosts, error } = await supabaseClient.from('posts')
-                .select('*, profiles:user_id(id, username, avatar_url)')
-                .eq('user_id', currentUser.id)
-                .order('created_at', { ascending: false });
-
-            if (error) { myPostsList.innerHTML = `<div class="empty">加载失败：${error.message}</div>`; return; }
+            const result = await window.api.database.getUserPosts(currentUser.id);
+            
+            if (!result.success) { myPostsList.innerHTML = `<div class="empty">加载失败：${result.message}</div>`; return; }
+            const myPosts = result.data;
             if (!myPosts || myPosts.length === 0) { myPostsList.innerHTML = `<div class="empty">还没有发布过帖子</div>`; return; }
 
             myPostsList.innerHTML = myPosts.map(post => renderPost(post)).join('');
@@ -4296,21 +4239,25 @@
             const content = document.getElementById('user-profile-content');
             content.innerHTML = spinner();
 
-            const { data: profile, error } = await supabaseClient.from('profiles')
-                .select('*').eq('id', userId).single();
-            if (error) { content.innerHTML = `<div class="empty">加载失败：${error.message}</div>`; return; }
+            try {
+                const profileResult = await window.api.database.getProfile(userId);
+                console.log('[loadUserHomePage] profileResult:', profileResult);
+                if (!profileResult || !profileResult.success || !profileResult.data) {
+                    content.innerHTML = `<div class="empty">加载失败：${profileResult?.message || '用户不存在'}</div>`;
+                    return;
+                }
+                const profile = profileResult.data;
 
-            const { data: posts } = await supabaseClient.from('posts')
-                .select('id, likes_count').eq('user_id', userId);
+            const postsResult = await window.api.database.getUserPosts(userId);
+            const posts = postsResult.success ? postsResult.data : [];
             const postCount = posts ? posts.length : 0;
             const totalLikes = posts ? posts.reduce((sum, p) => sum + (p.likes_count || 0), 0) : 0;
             const firstChar = (profile.username || '?').charAt(0);
 
             let isFollowing = false;
             if (currentUser) {
-                const { data: follow } = await supabaseClient.from('follows')
-                    .select('id').eq('follower_id', currentUser.id).eq('following_id', userId).single();
-                isFollowing = !!follow;
+                const followResult = await window.api.database.checkFollowStatus(userId);
+                isFollowing = followResult.success && followResult.data?.isFollowing;
             }
 
             content.innerHTML = `
@@ -4347,57 +4294,38 @@
             `;
 
             const userPostsList = document.getElementById('user-posts-list');
-            const { data: userPosts, error: postError } = await supabaseClient.from('posts')
-                .select('*, profiles:user_id(id, username, avatar_url)')
-                .eq('user_id', userId)
-                .order('created_at', { ascending: false });
-
-            if (postError) { userPostsList.innerHTML = `<div class="empty">加载失败：${postError.message}</div>`; return; }
+            const userPostsResult = await window.api.database.getUserPosts(userId);
+            
+            if (!userPostsResult.success) { userPostsList.innerHTML = `<div class="empty">加载失败：${userPostsResult.message}</div>`; return; }
+            const userPosts = userPostsResult.data;
             if (!userPosts || userPosts.length === 0) { userPostsList.innerHTML = `<div class="empty">TA还没有发布过帖子</div>`; return; }
 
             userPostsList.innerHTML = userPosts.map(post => renderPost(post)).join('');
+            } catch (e) {
+                console.error('[loadUserHomePage] Error:', e);
+                content.innerHTML = `<div class="empty">加载失败：${e.message}</div>`;
+            }
         }
 
         async function toggleFollow(userId) {
             if (!currentUser) { showMessage('请先登录', 'error'); return; }
             const btn = document.getElementById('follow-btn');
 
-            const { data: existing, error: checkError } = await supabaseClient.from('follows')
-                .select('id').eq('follower_id', currentUser.id).eq('following_id', userId).single();
+            const result = await window.api.database.toggleFollow(userId);
+            if (!result.success) { 
+                showMessage('操作失败：' + result.message, 'error'); 
+                return; 
+            }
 
-            if (checkError && checkError.code !== 'PGRST116') { showMessage('操作失败：' + checkError.message, 'error'); return; }
-
-            if (existing) {
-                await supabaseClient.from('follows').delete().eq('id', existing.id);
-                showMessage('已取消关注', 'success');
-                btn.className = 'btn btn-primary';
-                btn.textContent = '+ 关注';
-            } else {
-                const { error } = await supabaseClient.from('follows').insert([
-                    { follower_id: currentUser.id, following_id: userId }
-                ]);
-                if (error) { showMessage('关注失败：' + error.message, 'error'); return; }
+            if (result.data?.isFollowing) {
                 showMessage('关注成功！', 'success');
                 btn.className = 'btn btn-outline btn-following';
                 btn.textContent = '已关注';
+            } else {
+                showMessage('已取消关注', 'success');
+                btn.className = 'btn btn-primary';
+                btn.textContent = '+ 关注';
             }
-
-            // 前端兜底：实时查询 follows 表计算粉丝数并更新显示
-            // 防止数据库触发器未生效时粉丝数不更新
-            try {
-                const { count } = await supabaseClient.from('follows')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('following_id', userId);
-                const followersEl = document.querySelectorAll('.stat-label');
-                followersEl.forEach(el => {
-                    if (el.textContent === '粉丝') {
-                        const numEl = el.previousElementSibling;
-                        if (numEl && numEl.classList.contains('stat-num')) {
-                            numEl.textContent = count || 0;
-                        }
-                    }
-                });
-            } catch (e) {}
 
             loadUserHomePage(userId);
         }
@@ -4435,8 +4363,13 @@
         async function deletePost(postId, event) {
             if (event) event.stopPropagation();
             if (!confirm('确定要删除这条帖子吗？删除后无法恢复。')) return;
-            const { error } = await supabaseClient.from('posts').delete().eq('id', postId).eq('user_id', currentUser.id);
-            if (error) { showMessage('删除失败：' + error.message, 'error'); return; }
+            
+            const result = await window.api.database.deletePost(postId);
+            if (!result.success) { 
+                showMessage('删除失败：' + result.message, 'error'); 
+                return; 
+            }
+            
             showMessage('删除成功', 'success');
             const currentPage = document.querySelector('.page:not(.hidden)');
             if (currentPage.id === 'page-detail') { navigateHome(); }
@@ -4460,9 +4393,12 @@
             editPostId = postId;
 
             // 获取帖子数据
-            const { data: post, error } = await supabaseClient.from('posts')
-                .select('*').eq('id', postId).eq('user_id', currentUser.id).single();
-            if (error || !post) { showMessage('无法编辑此帖子', 'error'); return; }
+            const result = await window.api.database.getPost(postId);
+            if (!result.success || !result.data) { 
+                showMessage('无法编辑此帖子', 'error'); 
+                return; 
+            }
+            const post = result.data;
 
             // 填充数据
             document.getElementById('edit-post-title').value = post.title || '';
@@ -4519,11 +4455,19 @@
                 let imageFile = file;
                 try { imageFile = await compressImage(file, 800); } catch (e) { /* 用原图 */ }
                 const ext = file.name.split('.').pop() || 'jpg';
-                const filePath = `${currentUser.id}/edit_${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-                const { error: uploadError } = await supabaseClient.storage.from('posts').upload(filePath, imageFile);
-                if (uploadError) { showMessage('图片上传失败', 'error'); continue; }
-                const { data: urlData } = supabaseClient.storage.from('posts').getPublicUrl(filePath);
-                editPostImages.push(urlData.publicUrl);
+                const filePath = `posts/${currentUser.id}/edit_${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+                
+                try {
+                    const uploadResult = await window.api.storage.uploadImage(imageFile, filePath);
+                    if (uploadResult.fileID) {
+                        const url = window.api.storage.getImageUrl(filePath);
+                        editPostImages.push(url);
+                    } else {
+                        showMessage('图片上传失败', 'error');
+                    }
+                } catch (e) {
+                    showMessage('图片上传失败: ' + e.message, 'error');
+                }
             }
 
             renderEditPostImagesPreview();
@@ -4552,12 +4496,12 @@
             // 图片有改动时清空缩略图，避免旧缩略图与新原图不匹配
             if (imagesChanged) updatePayload.thumbnail_urls = null;
 
-            const { error } = await supabaseClient.from('posts')
-                .update(updatePayload)
-                .eq('id', editPostId)
-                .eq('user_id', currentUser.id);
+            const result = await window.api.database.updatePost(editPostId, updatePayload);
 
-            if (error) { showMessage('保存失败：' + error.message, 'error'); return; }
+            if (!result.success) { 
+                showMessage('保存失败：' + result.message, 'error'); 
+                return; 
+            }
 
             showMessage('帖子已更新！', 'success');
             closeEditPostModal();
@@ -4620,35 +4564,26 @@
 
             const isAdmin = isCurrentUserSuperAdmin();
 
+            // 检查是否已举报
             if (!isAdmin) {
-                const table = type === 'post' ? 'reports' : 'comment_reports';
-                const targetField = type === 'post' ? 'post_id' : 'comment_id';
-                const { data: existing } = await supabaseClient.from(table)
-                    .select('id').eq(targetField, targetId).eq('user_id', currentUser.id).single();
-                if (existing) { 
-                    showMessage(type === 'post' ? '您已举报过此帖子' : '您已举报过此评论', 'error'); 
-                    closeReportModal(); return; 
-                }
-            } else {
-                // 超管可以先删除再举报
-                if (type === 'post') {
-                    await supabaseClient.from('reports')
-                        .delete().eq('post_id', targetId).eq('user_id', currentUser.id);
+                const checkResult = await window.api.database.checkReportStatus(targetId, type);
+                if (checkResult.success && checkResult.data?.hasReported) {
+                    showMessage(type === 'post' ? '您已举报过此帖子' : '您已举报过此评论', 'error');
+                    closeReportModal();
+                    return;
                 }
             }
 
-            const table = type === 'post' ? 'reports' : 'comment_reports';
-            const insertData = {
-                user_id: currentUser.id,
-                reason: reasonText
-            };
-            if (type === 'post') insertData.post_id = targetId;
-            else insertData.comment_id = targetId;
+            // 提交举报
+            let result;
+            if (type === 'post') {
+                result = await window.api.database.reportPost(targetId, reasonText);
+            } else {
+                result = await window.api.database.reportComment(targetId, reasonText);
+            }
 
-            const { error } = await supabaseClient.from(table).insert([insertData]);
-            if (error) {
-                if (error.code === '23505') showMessage('您已经举报过该内容了', 'error');
-                else showMessage('举报失败：' + error.message, 'error');
+            if (!result.success) {
+                showMessage('举报失败：' + result.message, 'error');
                 return;
             }
 
@@ -4694,12 +4629,10 @@
             const reasonText = selectedUserReportReason === '其他' ? detail : selectedUserReportReason;
             if (!reasonText) { showMessage('请填写详细说明', 'error'); return; }
 
-            const { error } = await supabaseClient.from('user_reports')
-                .insert([{ target_user_id: reportTargetUserId, reporter_id: currentUser.id, reason: reasonText }]);
+            const result = await window.api.database.reportUser(reportTargetUserId, reasonText);
             
-            if (error) {
-                if (error.code === '23505') showMessage('您已经举报过该用户了', 'error');
-                else showMessage('举报失败：' + error.message, 'error');
+            if (!result.success) {
+                showMessage('举报失败：' + result.message, 'error');
                 return;
             }
 
@@ -4714,11 +4647,6 @@
                     <div style="font-size:28px;">⚖️</div>
                     <h3 style="color:#0A4D8C;margin:5px 0;">公审大厅</h3>
                 </div>
-                <div class="trial-tabs">
-                    <div class="trial-tab ${currentTrialTab === 'post' ? 'active' : ''}" onclick="switchTrialTab('post')">帖子公审</div>
-                    <div class="trial-tab ${currentTrialTab === 'comment' ? 'active' : ''}" onclick="switchTrialTab('comment')">评论公审</div>
-                    <div class="trial-tab ${currentTrialTab === 'user' ? 'active' : ''}" onclick="switchTrialTab('user')">用户公审</div>
-                </div>
                 <div id="trial-list-container">
                     <div style="text-align:center;padding:20px;"><div style="font-size:20px;margin-bottom:10px;">⚖️</div>正在加载列表...</div>
                 </div>
@@ -4726,27 +4654,22 @@
 
             const container = document.getElementById('trial-list-container');
             try {
-                if (currentTrialTab === 'post') {
-                    await loadPostTrialList(container);
-                } else if (currentTrialTab === 'comment') {
-                    await loadCommentTrialList(container);
-                } else {
-                    await loadUserTrialList(container);
-                }
+                await loadPostTrialList(container);
             } catch (err) {
                 container.innerHTML = `<div class="empty">加载失败：${err.message}</div>`;
             }
         }
 
-        function switchTrialTab(tab) {
-            if (currentTrialTab === tab) return;
-            currentTrialTab = tab;
-            loadTrialList();
-        }
-
         async function loadPostTrialList(container) {
-            const { data: trials, error } = await supabaseClient.rpc('get_active_trials');
-            if (error) throw error;
+            let trials, votedMap = {};
+            try {
+                const result = await window.api.database.getTrials();
+                if (!result.success) throw new Error(result.message || '获取公审列表失败');
+                trials = result.data || [];
+            } catch (e) {
+                container.innerHTML = `<div class="empty">加载失败：${e.message}</div>`;
+                return;
+            }
 
             let html = '';
             if (!trials || trials.length === 0) {
@@ -4760,14 +4683,15 @@
                 return;
             }
 
-            let votedMap = {};
+            // 获取投票记录
             if (currentUser) {
-                const trialIds = trials.map(t => t.trial_id);
-                const { data: votes } = await supabaseClient.from('trial_votes')
-                    .select('trial_id, verdict')
-                    .eq('user_id', currentUser.id)
-                    .in('trial_id', trialIds);
-                if (votes) votes.forEach(v => { votedMap[v.trial_id] = v.verdict; });
+                try {
+                    const trialIds = trials.map(t => t.trial_id || t.id);
+                    const votesResult = await window.api.callFunction('trials/my-votes', { trialIds });
+                    if (votesResult.success && votesResult.data) {
+                        votesResult.data.forEach(v => { votedMap[v.trial_id] = v.verdict; });
+                    }
+                } catch (e) { console.error('获取投票记录失败', e); }
             }
 
             const activeCount = trials.filter(t => t.status === 'active').length;
@@ -4844,113 +4768,6 @@
             container.innerHTML = html;
         }
 
-        async function loadUserTrialList(container) {
-            const { data: trials, error } = await supabaseClient.rpc('get_active_user_trials');
-            if (error) {
-                container.innerHTML = `<div class="empty">加载失败：${error.message}</div>`;
-                return;
-            }
-
-            let html = '';
-            if (!trials || trials.length === 0) {
-                html = `
-                    <div style="text-align:center;padding:40px;">
-                        <p style="color:#888;">当前没有待审核的用户</p>
-                        <p style="color:#999;font-size:13px;margin-top:10px;">被举报≥2次的用户将自动进入公审</p>
-                    </div>
-                `;
-                container.innerHTML = html;
-                return;
-            }
-
-            let votedMap = {};
-            if (currentUser) {
-                const trialIds = trials.map(t => t.trial_id);
-                const { data: votes } = await supabaseClient.from('user_trial_votes')
-                    .select('trial_id, verdict')
-                    .eq('user_id', currentUser.id)
-                    .in('trial_id', trialIds);
-                if (votes) votes.forEach(v => { votedMap[v.trial_id] = v.verdict; });
-            }
-
-            const activeCount = trials.filter(t => t.status === 'active').length;
-            html += `<p style="color:#999;font-size:13px;margin-bottom:15px;">${trials.length} 个用户等待处理${activeCount > 0 ? `（${activeCount} 个投票中）` : ''} · 超级管理员可直接处理</p>`;
-
-            const isAdmin = isCurrentUserSuperAdmin();
-
-            for (const t of trials) {
-                const total = (t.ban_count || 0) + (t.innocent_count || 0);
-                const banPct = total > 0 ? ((t.ban_count / total) * 100) : 50;
-                const innocentPct = total > 0 ? ((t.innocent_count / total) * 100) : 50;
-                const myVote = votedMap[t.trial_id] || null;
-                const userName = t.target_username || '匿名';
-                const firstChar = userName.charAt(0);
-                const avatarHtml = t.target_avatar_url
-                    ? `<img src="${t.target_avatar_url}" alt="">`
-                    : firstChar;
-
-                const isActive = t.status === 'active';
-                const isBanned = t.status === 'banned';
-                const badgeClass = isBanned ? 'badge-banned' : (t.status === 'innocent' ? 'badge-innocent' : '');
-                const badgeText = isBanned ? '已封禁' : (t.status === 'innocent' ? '已释放' : '待审');
-
-                const canShowReason = isBanned && t.ban_reason && t.resolved_at;
-                const resolvedTime = t.resolved_at ? new Date(t.resolved_at) : null;
-                const within24Hours = resolvedTime && (Date.now() - resolvedTime.getTime()) < 24 * 60 * 60 * 1000;
-
-                html += `
-                <div class="trial-card">
-                    <div class="trial-card-header">
-                        <div class="avatar">${avatarHtml}</div>
-                        <div>
-                            <div class="trial-card-author">${userName}</div>
-                            <div class="trial-card-time">${formatTime(t.created_at)} 被送审</div>
-                        </div>
-                        ${badgeClass ? `<span class="trial-card-resolved-badge ${badgeClass}">${badgeText}</span>` : `<span class="trial-badge">${badgeText}</span>`}
-                    </div>
-                    ${t.target_bio ? `<div class="trial-card-content">${escapeHtml(t.target_bio)}</div>` : ''}
-                    ${t.report_count > 0 ? `<p style="color:#999;font-size:12px;margin:8px 0;">该用户已被举报 ${t.report_count} 次</p>` : ''}
-                    ${canShowReason && within24Hours ? `
-                        <div class="trial-card-reason">
-                            <strong>封禁原因：</strong>${escapeHtml(t.ban_reason)}
-                        </div>
-                    ` : ''}
-                    <div class="trial-vote-bar">
-                        <div class="trial-vote-count">
-                            <span class="violate-num">${t.ban_count || 0}</span> 封禁 /
-                            <span class="clean-num">${t.innocent_count || 0}</span> 合规
-                        </div>
-                        <div class="trial-progress">
-                            <div class="violate-bar" style="width:${banPct}%"></div>
-                            <div class="clean-bar" style="width:${innocentPct}%"></div>
-                        </div>
-                    </div>
-                    <div class="trial-vote-btns">
-                        ${currentUser && isActive ? `
-                            <button class="btn-violate ${myVote === 'ban' ? 'voted' : ''}"
-                                onclick="castUserTrialVote('${t.trial_id}', 'ban', this)"
-                                ${myVote ? 'disabled' : ''}>
-                                ${myVote === 'ban' ? '✓ 已投封禁' : '🔥 封禁'}
-                            </button>
-                            <button class="btn-clean ${myVote === 'innocent' ? 'voted' : ''}"
-                                onclick="castUserTrialVote('${t.trial_id}', 'innocent', this)"
-                                ${myVote ? 'disabled' : ''}>
-                                ${myVote === 'innocent' ? '✓ 已投合规' : '✅ 合规'}
-                            </button>
-                        ` : (!currentUser && isActive ? '<span style="color:#999;font-size:13px;">登录后可投票</span>' : '<span style="color:#999;font-size:13px;">投票已结束</span>')}
-                    </div>
-                    ${isAdmin && isActive && t.target_user_id ? `
-                        <div class="trial-vote-btns" style="margin-top:10px;">
-                            <button class="btn btn-danger" onclick="adminBanUserTrial('${t.trial_id}', '${t.target_user_id}', event)">🚫 封禁该用户</button>
-                            <button class="btn btn-outline" style="border-color:#999;color:#666;" onclick="adminKeepUserTrial('${t.trial_id}', event)">✅ 释放该用户</button>
-                        </div>
-                    ` : ''}
-                </div>`;
-            }
-
-            container.innerHTML = html;
-        }
-
         async function castTrialVote(trialId, verdict, btn) {
             if (!currentUser) { showMessage('请先登录', 'error'); return; }
             if (btn.disabled) return;
@@ -4958,122 +4775,17 @@
             btn.disabled = true;
             btn.textContent = '投票中...';
 
-            const { data, error } = await supabaseClient.rpc('vote_trial', {
-                p_trial_id: trialId,
-                p_user_id: currentUser.id,
-                p_verdict: verdict
-            });
-
-            if (error) {
-                showMessage('投票失败：' + error.message, 'error');
-                btn.disabled = false;
-                btn.textContent = verdict === 'violate' ? '🔥 违规' : '✅ 合规';
-                return;
-            }
-
-            if (data && data.error) {
-                showMessage(data.error, 'error');
-                btn.disabled = false;
-                btn.textContent = verdict === 'violate' ? '🔥 违规' : '✅ 合规';
-                return;
-            }
-
-            showMessage('投票成功！', 'success');
-            loadTrialList();
-        }
-
-        async function castUserTrialVote(trialId, verdict, btn) {
-            if (!currentUser) { showMessage('请先登录', 'error'); return; }
-            if (btn.disabled) return;
-
-            btn.disabled = true;
-            btn.textContent = '投票中...';
-
-            const { data, error } = await supabaseClient.rpc('vote_user_trial', {
-                p_trial_id: trialId,
-                p_user_id: currentUser.id,
-                p_verdict: verdict
-            });
-
-            if (error) {
-                showMessage('投票失败：' + error.message, 'error');
-                btn.disabled = false;
-                btn.textContent = verdict === 'ban' ? '🔥 封禁' : '✅ 合规';
-                return;
-            }
-
-            if (data && data.error) {
-                showMessage(data.error, 'error');
-                btn.disabled = false;
-                btn.textContent = verdict === 'ban' ? '🔥 封禁' : '✅ 合规';
-                return;
-            }
-
-            showMessage('投票成功！', 'success');
-            loadTrialList();
-        }
-
-        async function adminBanUserTrial(trialId, targetUserId, event) {
-            if (event) event.stopPropagation();
-            if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
-            
-            const reason = prompt('请输入封禁原因：', '发布违规内容');
-            if (!reason || !reason.trim()) { showMessage('请输入封禁原因', 'error'); return; }
-            
-            if (!confirm(`确定要封禁该用户吗？封禁后将限制该用户的 IP 和设备访问。\n\n封禁原因：${reason}`)) return;
-
             try {
-                const { data: banData, error: banError } = await supabaseClient.rpc('ban_user_ip', {
-                    target_user_id: targetUserId,
-                    admin_user_id: currentUser.id,
-                    reason: reason.trim()
-                });
-                if (banError) throw banError;
-                
-                if (!banData?.success) {
-                    showMessage(banData?.error || '封禁失败', 'error');
-                    return;
+                const result = await window.api.database.voteTrial(trialId, verdict);
+                if (!result.success) {
+                    throw new Error(result.message || result.error || '投票失败');
                 }
-
-                const { data: resolveData, error: resolveError } = await supabaseClient.rpc('resolve_user_trial', {
-                    p_trial_id: trialId,
-                    p_admin_user_id: currentUser.id,
-                    p_status: 'banned',
-                    p_reason: reason.trim()
-                });
-                if (resolveError) throw resolveError;
-                if (!resolveData?.success) {
-                    showMessage(resolveData?.error || '结案失败', 'error');
-                    return;
-                }
-
-                showMessage('已封禁该用户并结案', 'success');
+                showMessage('投票成功！', 'success');
                 loadTrialList();
             } catch (e) {
-                showMessage('操作失败：' + e.message, 'error');
-            }
-        }
-
-        async function adminKeepUserTrial(trialId, event) {
-            if (event) event.stopPropagation();
-            if (!isCurrentUserSuperAdmin()) { showMessage('无权限', 'error'); return; }
-            if (!confirm('确定要释放该用户吗？该用户将保持正常状态。')) return;
-
-            try {
-                const { data, error } = await supabaseClient.rpc('resolve_user_trial', {
-                    p_trial_id: trialId,
-                    p_admin_user_id: currentUser.id,
-                    p_status: 'innocent'
-                });
-                if (error) throw error;
-                if (data?.success) {
-                    showMessage('已释放该用户', 'success');
-                    loadTrialList();
-                } else {
-                    showMessage(data?.error || '操作失败', 'error');
-                }
-            } catch (e) {
-                showMessage('操作失败：' + e.message, 'error');
+                showMessage('投票失败：' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = verdict === 'violate' ? '🔥 违规' : '✅ 合规';
             }
         }
 
@@ -5083,16 +4795,12 @@
             if (!confirm('确定要删除该帖子吗？删除后帖子将从首页/搜索/热榜/分类中移除，但保留在作者主页。')) return;
 
             try {
-                const { data, error } = await supabaseClient.rpc('admin_delete_trial_post', {
-                    p_trial_id: trialId,
-                    admin_user_id: currentUser.id
-                });
-                if (error) throw error;
-                if (data?.success) {
+                const result = await window.api.database.adminDeleteTrialPost(trialId);
+                if (result.success) {
                     showMessage('已删除该帖子并结案', 'success');
                     loadTrialList();
                 } else {
-                    showMessage(data?.error || '操作失败', 'error');
+                    showMessage(result.message || result.error || '操作失败', 'error');
                 }
             } catch (e) {
                 showMessage('操作失败：' + e.message, 'error');
@@ -5105,219 +4813,31 @@
             if (!confirm('确定要保留该帖子吗？帖子将保持正常显示。')) return;
 
             try {
-                const { data, error } = await supabaseClient.rpc('resolve_trial', {
-                    p_trial_id: trialId,
-                    admin_user_id: currentUser.id
-                });
-                if (error) throw error;
-                if (data?.success) {
+                const result = await window.api.database.adminResolveTrial(trialId);
+                if (result.success) {
                     showMessage('已保留该帖子', 'success');
                     loadTrialList();
                 } else {
-                    showMessage(data?.error || '操作失败', 'error');
+                    showMessage(result.message || result.error || '操作失败', 'error');
                 }
             } catch (e) {
                 showMessage('操作失败：' + e.message, 'error');
             }
         }
 
-        async function loadCommentTrialList(container) {
-            const { data: trials, error } = await supabaseClient.rpc('get_active_comment_trials');
-            if (error) {
-                container.innerHTML = `<div class="empty">加载失败：${error.message}</div>`;
-                return;
-            }
-
-            let html = '';
-            if (!trials || trials.length === 0) {
-                html = `
-                    <div style="text-align:center;padding:40px;">
-                        <p style="color:#888;">当前没有待审核的评论</p>
-                        <p style="color:#999;font-size:13px;margin-top:10px;">被举报≥2次的评论将自动进入公审</p>
-                    </div>
-                `;
-                container.innerHTML = html;
-                return;
-            }
-
-            let votedMap = {};
-            if (currentUser) {
-                const trialIds = trials.map(t => t.trial_id);
-                const { data: votes } = await supabaseClient.from('comment_trial_votes')
-                    .select('trial_id, verdict')
-                    .eq('user_id', currentUser.id)
-                    .in('trial_id', trialIds);
-                if (votes) votes.forEach(v => { votedMap[v.trial_id] = v.verdict; });
-            }
-
-            const activeCount = trials.filter(t => t.status === 'active').length;
-            html += `<p style="color:#999;font-size:13px;margin-bottom:15px;">${trials.length} 条评论等待处理${activeCount > 0 ? `（${activeCount} 条投票中）` : ''} · 超级管理员可直接处理</p>`;
-
-            const isAdmin = isCurrentUserSuperAdmin();
-
-            for (const t of trials) {
-                const total = (t.ban_count || 0) + (t.innocent_count || 0);
-                const banPct = total > 0 ? ((t.ban_count / total) * 100) : 50;
-                const innocentPct = total > 0 ? ((t.innocent_count / total) * 100) : 50;
-                const myVote = votedMap[t.trial_id] || null;
-                const userName = t.target_username || '匿名';
-                const firstChar = userName.charAt(0);
-                const avatarHtml = t.target_avatar_url
-                    ? `<img src="${t.target_avatar_url}" alt="">`
-                    : firstChar;
-
-                const isActive = t.status === 'active';
-                const isBanned = t.status === 'banned';
-                const badgeClass = isBanned ? 'badge-banned' : (t.status === 'innocent' ? 'badge-innocent' : '');
-                const badgeText = isBanned ? '已删除' : (t.status === 'innocent' ? '已保留' : '待审');
-
-                const canShowReason = isBanned && t.ban_reason && t.resolved_at;
-                const resolvedTime = t.resolved_at ? new Date(t.resolved_at) : null;
-                const within24Hours = resolvedTime && (Date.now() - resolvedTime.getTime()) < 24 * 60 * 60 * 1000;
-
-                html += `
-                <div class="trial-card">
-                    <div class="trial-card-header">
-                        <div class="avatar">${avatarHtml}</div>
-                        <div>
-                            <div class="trial-card-author">${userName}</div>
-                            <div class="trial-card-time">${formatTime(t.created_at)} 被送审</div>
-                        </div>
-                        ${badgeClass ? `<span class="trial-card-resolved-badge ${badgeClass}">${badgeText}</span>` : `<span class="trial-badge">${badgeText}</span>`}
-                    </div>
-                    <div style="font-size:12px;color:#666;margin-bottom:8px;">来自帖子：${escapeHtml(t.post_title || '')}</div>
-                    <div class="trial-card-content">${escapeHtml(t.comment_content || '')}</div>
-                    ${t.report_count > 0 ? `<p style="color:#999;font-size:12px;margin:8px 0;">该评论已被举报 ${t.report_count} 次</p>` : ''}
-                    ${canShowReason && within24Hours ? `
-                        <div class="trial-card-reason">
-                            <strong>删除原因：</strong>${escapeHtml(t.ban_reason)}
-                        </div>
-                    ` : ''}
-                    <div class="trial-vote-bar">
-                        <div class="trial-vote-count">
-                            <span class="violate-num">${t.ban_count || 0}</span> 删除 /
-                            <span class="clean-num">${t.innocent_count || 0}</span> 保留
-                        </div>
-                        <div class="trial-progress">
-                            <div class="violate-bar" style="width:${banPct}%"></div>
-                            <div class="clean-bar" style="width:${innocentPct}%"></div>
-                        </div>
-                    </div>
-                    <div class="trial-vote-btns">
-                        ${currentUser && isActive ? `
-                            <button class="btn-violate ${myVote === 'ban' ? 'voted' : ''}"
-                                onclick="castCommentTrialVote('${t.trial_id}', 'ban', this)"
-                                ${myVote ? 'disabled' : ''}>
-                                ${myVote === 'ban' ? '✓ 已投删除' : '🔥 删除'}
-                            </button>
-                            <button class="btn-clean ${myVote === 'innocent' ? 'voted' : ''}"
-                                onclick="castCommentTrialVote('${t.trial_id}', 'innocent', this)"
-                                ${myVote ? 'disabled' : ''}>
-                                ${myVote === 'innocent' ? '✓ 已投保留' : '✅ 保留'}
-                            </button>
-                        ` : (!currentUser && isActive ? '<span style="color:#999;font-size:13px;">登录后可投票</span>' : '<span style="color:#999;font-size:13px;">投票已结束</span>')}
-                    </div>
-                    ${isAdmin && isActive && t.comment_id ? `
-                        <div class="trial-vote-btns" style="margin-top:10px;">
-                            <button class="btn btn-danger" onclick="adminDeleteCommentTrial('${t.trial_id}', '${t.comment_id}', event)">🚫 删除该评论</button>
-                            <button class="btn btn-outline" style="border-color:#999;color:#666;" onclick="adminKeepCommentTrial('${t.trial_id}', event)">✅ 保留该评论</button>
-                        </div>
-                    ` : ''}
-                </div>`;
-            }
-
-            container.innerHTML = html;
-        }
-
-        async function castCommentTrialVote(trialId, verdict, btn) {
-            if (!currentUser) { showMessage('请先登录', 'error'); return; }
-            if (btn.disabled) return;
-
-            btn.disabled = true;
-            btn.textContent = '投票中...';
-
-            const { data, error } = await supabaseClient.rpc('vote_comment_trial', {
-                p_trial_id: trialId,
-                p_user_id: currentUser.id,
-                p_verdict: verdict
-            });
-
-            if (error) {
-                showMessage('投票失败：' + error.message, 'error');
-                btn.disabled = false;
-                btn.textContent = verdict === 'ban' ? '🔥 删除' : '✅ 保留';
-                return;
-            }
-
-            if (!data.success) {
-                showMessage(data.error || '投票失败', 'error');
-                btn.disabled = false;
-                btn.textContent = verdict === 'ban' ? '🔥 删除' : '✅ 保留';
-                return;
-            }
-
-            showMessage('投票成功', 'success');
-            btn.textContent = verdict === 'ban' ? '✓ 已投删除' : '✓ 已投保留';
-            loadTrialList();
-        }
-
-        async function adminDeleteCommentTrial(trialId, commentId, event) {
-            if (!isCurrentUserSuperAdmin()) { showMessage('权限不足', 'error'); return; }
-            if (event) event.stopPropagation();
-
-            const reason = prompt('请输入删除原因（将显示24小时）：');
-            if (!reason) { showMessage('请输入删除原因', 'error'); return; }
-
-            const { data, error } = await supabaseClient.rpc('admin_delete_comment_trial', {
-                p_trial_id: trialId,
-                admin_user_id: currentUser.id,
-                p_reason: reason
-            });
-
-            if (error) {
-                showMessage('操作失败：' + error.message, 'error');
-                return;
-            }
-
-            if (!data.success) {
-                showMessage(data.error || '操作失败', 'error');
-                return;
-            }
-
-            showMessage('评论已删除，公审已结案', 'success');
-            loadTrialList();
-        }
-
-        async function adminKeepCommentTrial(trialId, event) {
-            if (!isCurrentUserSuperAdmin()) { showMessage('权限不足', 'error'); return; }
-            if (event) event.stopPropagation();
-
-            const { data, error } = await supabaseClient.rpc('resolve_comment_trial', {
-                p_trial_id: trialId,
-                admin_user_id: currentUser.id
-            });
-
-            if (error) {
-                showMessage('操作失败：' + error.message, 'error');
-                return;
-            }
-
-            if (!data.success) {
-                showMessage(data.error || '操作失败', 'error');
-                return;
-            }
-
-            showMessage('评论已保留，公审已结案', 'success');
-            loadTrialList();
-        }
-
         async function deleteComment(commentId, event) {
             if (event) event.stopPropagation();
             if (!confirm('确定要删除这条评论吗？')) return;
-            const { error } = await supabaseClient.from('comments').delete().eq('id', commentId).eq('user_id', currentUser.id);
-            if (error) { showMessage('删除失败：' + error.message, 'error'); return; }
-            showMessage('评论已删除', 'success');
-            if (currentDetailPostId) loadPostDetail(currentDetailPostId);
+            try {
+                const result = await window.api.database.deleteComment(commentId);
+                if (!result.success) {
+                    throw new Error(result.message || '删除失败');
+                }
+                showMessage('评论已删除', 'success');
+                if (currentDetailPostId) loadPostDetail(currentDetailPostId);
+            } catch (e) {
+                showMessage('删除失败：' + e.message, 'error');
+            }
         }
 
         function toggleEditForm() {
@@ -5330,20 +4850,46 @@
             if (!file) return;
             let imageFile = file;
             try { imageFile = await compressImage(file, 300); } catch (e) { /* 用原图 */ }
-            const ext = 'jpg';
-            const filePath = `${currentUser.id}/avatar_${Date.now()}.${ext}`;
-            const { error: uploadError } = await supabaseClient.storage.from('posts').upload(filePath, imageFile);
-            if (uploadError) { showMessage('头像上传失败：' + uploadError.message, 'error'); return; }
-            const { data: urlData } = supabaseClient.storage.from('posts').getPublicUrl(filePath);
-            const avatarUrl = urlData.publicUrl + '?t=' + Date.now();
 
-            const { error } = await supabaseClient.from('profiles')
-                .update({ avatar_url: avatarUrl }).eq('id', currentUser.id);
-            if (error) { showMessage('更新头像失败：' + error.message, 'error'); return; }
-            currentUser.avatar_url = avatarUrl;
-            showMessage('头像更新成功！', 'success');
-            updateNav();
-            loadProfilePage();
+            try {
+                // 转换为 base64
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const base64 = e.target.result.split(',')[1];
+                    const filename = `avatar_${Date.now()}.jpg`;
+
+                    // 上传图片
+                    const uploadResult = await window.api.callFunction('upload/image', {
+                        file_base64: base64,
+                        filename,
+                        folder: 'avatars'
+                    });
+
+                    if (!uploadResult.success) {
+                        showMessage('头像上传失败：' + (uploadResult.message || '未知错误'), 'error');
+                        return;
+                    }
+
+                    const avatarUrl = uploadResult.data.url;
+
+                    // 更新用户资料
+                    const updateResult = await window.api.database.updateProfile({ avatar_url: avatarUrl });
+                    if (!updateResult.success) {
+                        showMessage('更新头像失败：' + (updateResult.message || '未知错误'), 'error');
+                        return;
+                    }
+
+                    currentUser.avatar_url = avatarUrl;
+                    // 更新 localStorage 中的用户信息
+                    localStorage.setItem('user', JSON.stringify(currentUser));
+                    showMessage('头像更新成功！', 'success');
+                    updateNav();
+                    loadProfilePage();
+                };
+                reader.readAsDataURL(imageFile);
+            } catch (e) {
+                showMessage('头像上传失败：' + e.message, 'error');
+            }
         }
 
         async function saveProfile() {
@@ -5353,30 +4899,38 @@
 
             if (!username) { showMessage('昵称不能为空', 'error'); return; }
 
-            // 更新 profile 信息
-            const { error } = await supabaseClient.from('profiles')
-                .update({ username, bio }).eq('id', currentUser.id);
-            if (error) { showMessage('保存失败：' + error.message, 'error'); return; }
-
-            currentUser.username = username;
-            currentUser.bio = bio;
-
-            // 如果有新密码，则更新密码
-            if (newPassword) {
-                if (newPassword.length < 6) {
-                    showMessage('密码至少需要6位', 'error'); return;
+            try {
+                // 更新 profile 信息
+                const result = await window.api.database.updateProfile({ username, bio });
+                if (!result.success) {
+                    throw new Error(result.message || '保存失败');
                 }
-                const { error: pwdError } = await supabaseClient.auth.updateUser({ password: newPassword });
-                if (pwdError) {
-                    showMessage('密码修改失败：' + pwdError.message, 'error'); return;
+
+                currentUser.username = username;
+                currentUser.bio = bio;
+                // 更新 localStorage
+                localStorage.setItem('user', JSON.stringify(currentUser));
+
+                // 如果有新密码，则更新密码
+                if (newPassword) {
+                    if (newPassword.length < 6) {
+                        showMessage('密码至少需要6位', 'error'); return;
+                    }
+                    const pwdResult = await window.api.callFunction('auth/update-password', { password: newPassword });
+                    if (!pwdResult.success) {
+                        showMessage('密码修改失败：' + (pwdResult.message || '未知错误'), 'error');
+                        return;
+                    }
+                    showMessage('资料和密码都已保存成功！', 'success');
+                } else {
+                    showMessage('保存成功！', 'success');
                 }
-                showMessage('资料和密码都已保存成功！', 'success');
-            } else {
-                showMessage('保存成功！', 'success');
+
+                updateNav();
+                loadProfilePage();
+            } catch (e) {
+                showMessage('保存失败：' + e.message, 'error');
             }
-
-            updateNav();
-            loadProfilePage();
         }
 
         function formatTime(timestamp) {
@@ -5420,7 +4974,6 @@
             }
         });
 
-        let splashHidden = false;
         function hideSplash() {
             if (splashHidden) return;
             splashHidden = true;
@@ -5434,18 +4987,12 @@
         // 启动页消失后检查公告
         async function checkAndShowAnnouncement() {
             try {
-                const { data, error } = await supabaseClient
-                    .from('site_content')
-                    .select('content, updated_at')
-                    .eq('key', 'announcement')
-                    .single();
-
-                if (error || !data) {
-                    // 数据库里没有公告，隐藏弹窗
+                const result = await window.api.database.getSiteContent(['announcement']);
+                if (!result.success || !result.data) {
                     return;
                 }
 
-                const announcementContent = data.content || '';
+                const announcementContent = result.data.announcement?.content || '';
                 const cachedContent = localStorage.getItem('announcement_cached') || '';
 
                 // 如果公告内容有变化，显示弹窗并更新缓存
@@ -5487,13 +5034,9 @@
         let tickerPollTimer = null;
         async function loadTickerAnnouncement() {
             try {
-                const { data, error } = await supabaseClient
-                    .from('site_content')
-                    .select('content')
-                    .eq('key', 'announcement')
-                    .single();
-                if (error || !data) return;
-                const text = (data.content || '').replace(/<[^>]*>/g, '').trim();
+                const result = await window.api.database.getSiteContent(['announcement']);
+                if (!result.success || !result.data) return;
+                const text = (result.data.announcement?.content || '').replace(/<[^>]*>/g, '').trim();
                 const el = document.getElementById('ticker-content');
                 if (el && text) {
                     el.textContent = text + '　·　' + text + '　·　';
@@ -5589,7 +5132,7 @@
                 return;
             }
 
-            const { data: { user } } = await supabaseClient.auth.getUser();
+            const user = window.api.auth.getCurrentUser();
             if (user) {
                 currentUser = user;
                 await loadUserProfile();

@@ -1,31 +1,13 @@
 {
   "envId": "cmfootball-d3gp9t11528eabd1f",
-  "framework": {
-    "name": "bigblue-email",
-    "plugins": {
-      "function": {
-        "use": "@cloudbase/framework-plugin-function",
-        "inputs": {
-          "functionRoot": "./cloudfunctions",
-          "functions": [
-            {
-              "name": "send-code",
-              "timeout": 15,
-              "envVariables": {
-                "SMTP_HOST": "smtp.163.com",
-                "SMTP_PORT": "465",
-                "SMTP_USER": "18520893735@163.com",
-                "SMTP_PASS": "YHnGJnyLfP7G9sLh",
-                "FROM_EMAIL": "18520893735@163.com"
-              }
-            },
-            {
-              "name": "verify-code",
-              "timeout": 10
-            }
-          ]
-        }
-      }
+  "functions": [
+    {
+      "name": "api",
+      "timeout": 30,
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "ignore": ["node_modules/**"],
+      "source": "functions/api"
     }
-  }
+  ]
 }
